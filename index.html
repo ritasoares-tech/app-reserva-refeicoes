@@ -1,228 +1,19 @@
 <!DOCTYPE html>
 <html lang="pt">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>App Cantina</title>
-
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-<style>
-:root{
-  --vermelho:#c62828;
-  --vermelho-escuro:#8e0000;
-  --preto:#1e1e1e;
-  --cinza:#e0e0e0;
-  --cinza-claro:#f5f5f5;
-}
-
-body{
-  margin:0;
-  font-family:Arial, sans-serif;
-  background:var(--cinza-claro);
-}
-
-.container{
-  max-width:420px;
-  background:white;
-  margin:20px auto;
-  padding:20px;
-  border-radius:14px;
-  box-shadow:0 6px 14px rgba(0,0,0,.15);
-}
-
-h1,h2{text-align:center}
-
-input,button,select{
-  width: 93%;
-  padding:12px;
-  margin-top:10px;
-  border-radius:8px;
-  border:1px solid var(--cinza);
-  font-size:15px;
-}
-
-button{
-  width:auto;
-  background:var(--vermelho);
-  color:white;
-  font-weight:bold;
-  border:none;
-}
-
-button:hover{background:var(--vermelho-escuro);cursor:pointer}
-.admin{background:var(--preto)}
-.admin:hover{background:black}
-
-.btn-full {
-  width: 100%;
-  padding: 14px;
-  font-size: 16px;
-}
-
-.hidden{display:none}
-
-.menu{
-  background:var(--cinza-claro);
-  border-left:5px solid var(--vermelho);
-  padding:12px;
-  margin-top:10px;
-  border-radius:8px;
-}
-
-.btn-back{
-  background:#555;
-  margin-top:15px;
-}
-.btn-back:hover{background:#333}
-
-#saldo{
-  text-align:center;
-  font-weight:bold;
-  font-size:18px;
-  color:var(--vermelho);
-}
-
-.menu-dia h3 {
-  background: #eee;
-  padding: 10px;
-  border-radius: 8px;
-  margin: 0;
-}
-
-.menu-dia h3:hover {
-  background: #ddd;
-}
-
-.menu-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid #eee;
-}
-
-.menu-item:last-child {
-  border-bottom: none;
-}
-
-.menu-item button {
-  width: 50%;          /* não ocupa toda a linha */
-  padding: 3px 6px;     /* compacto */
-  font-size: 16px;
-  margin-left: 5px;
-  border-radius: 6px;
-  border: 1px solid var(--cinza);
-  background: #fff;
-  cursor: pointer;
-  transition: transform 0.1s ease, background 0.2s ease;
-}
-
-.menu-item button:hover {
-  background: #eee;
-  transform: scale(1.2);
-}
-
-.edit-container input {
-  padding: 4px 6px;
-  border-radius: 6px;
-  border: 1px solid var(--cinza);
-  font-size: 14px;
-  width: 150px;
-}
-
-#diaMenu {
-  max-width: 200px;
-  padding: 6px;
-  border-radius: 6px;
-  border: 1px solid var(--cinza);
-  margin-bottom: 10px;
-}
-
-.historico-card {
-  background: #f9f9f9;
-  border-radius: 10px;
-  padding: 12px;
-  margin: 8px 0;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-}
-
-.historico-data {
-  font-weight: bold;
-  margin-bottom: 6px;
-  color: #c62828;
-}
-
-.historico-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 0;
-  border-bottom: 1px solid #eee;
-}
-
-.historico-item:last-child {
-  border-bottom: none;
-}
-
-.tipo-refeicao {
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: bold;
-  color: white;
-}
-
-.tipo-pequeno_almoco { background: #ffb74d; }
-.tipo-almoco { background: #4fc3f7; }
-.tipo-jantar { background: #81c784; }
-.tipo-dieta { background: #ba68c8; }
-
-.status-ativa { color: green; font-weight: bold; }
-.status-cancelada { color: red; font-weight: bold; }
-
-.aluno-card {
-  background: #f9f9f9;
-  padding: 10px;
-  border-radius: 8px;
-  margin: 6px 0;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-  cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.2s ease;
-}
-
-.aluno-card:hover {
-  transform: scale(1.02);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-.aluno-saldo-card {
-  background: #f9f9f9;
-  padding: 10px;
-  border-radius: 8px;
-  margin: 6px 0;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.aluno-saldo-card:hover {
-  transform: scale(1.02);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-}
-
-.btn-aluno-actions {
-  margin-left: 10px;
-  font-size: 12px;
-  padding: 4px 8px;
-}
-
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>App Cantina</title>
+  <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
+
+<!-- Dependências externas -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="js/supabase.js"></script>
+<script src="js/app.js"></script>
 
 <!-- LOGIN -->
 <div class="container" id="login">
@@ -232,807 +23,215 @@ button:hover{background:var(--vermelho-escuro);cursor:pointer}
   <button class="btn-full" id="btnLogin">Login</button>
 </div>
 
-<!-- MENU PRINCIPAL -->
-<div class="container hidden" id="menuSelect">
-  <h2 id="menuTitle"></h2>
-  <div id="buttons"></div>
-  <div id="saldo"></div>
+<!-- MENU PRINCIPAL ALUNO -->
+<div class="container hidden" id="alunoMenuSelect">
+  <h2 id="alunoMenuTitle"></h2>
+  <div id="saldo" style="font-size:18px; font-weight:700; margin-bottom:20px; color:var(--primary);"></div>
+  <div id="alunoButtons"></div>
   <button class="btn-full" onclick="logout()">Sair</button>
 </div>
 
-<!-- CANTINA -->
-      <!-- Criar Menu -->
+<!-- MENU PRINCIPAL CANTINA -->
+<div class="container hidden" id="cantinaMenuSelect">
+  <h2 id="cantinaMenuTitle"></h2>
+  <div id="cantinButtons"></div>
+  <button class="btn-full" onclick="logout()">Sair</button>
+</div>
+
+<!-- MENU SELECT (DEPRECATED - SUBSTITUÍDO PELOS ACIMA) -->
+<div class="container hidden" id="menuSelect">
+  <h2 id="menuTitle"></h2>
+  <div id="buttons"></div>
+  <button class="btn-full" onclick="logout()">Sair</button>
+</div>
+
+<!-- CRIAR MENU -->
 <div class="container hidden" id="cantinaMenu">
-  <h2>Criar Menu</h2>
-  <input id="dataMenu" type="date">
-  <input id="pratoMenu" placeholder="Prato (somente almoço)">
-  <select id="tipoMenu">
-    <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
-    <option value="almoco">🍽️ Almoço</option>
-    <option value="jantar">🍲 Jantar</option>
-    <option value="dieta">🥗 Dieta</option>
-  </select>
-  <button class="btn-full" id="btnAddMenu">Adicionar Menu</button>
-</div>
-
-      <!-- Menus Criados -->
-<div class="container hidden" id="cantinaMenus">
-  <h2>Menus Criados</h2>
-
-  <label for="diaMenu">Escolhe o dia:</label>
-  <input type="date" id="diaMenu">
-
-  <div id="listaMenus"></div>
-</div>
-
-      <!-- Reservas do Dia -->
-<div id="cantinaReservas" class="container hidden">
-  <h2>Reservas do dia</h2>
-
-  <div id="reservasDia"></div>
-  <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
-
-</div>
-
-      <!-- Histórico -->
-<div class="container hidden" id="cantinaHistorico">
-  <h2>Histórico de Reservas por Aluno</h2>
-  <div id="historico"></div>
-
-  <button class="btn-full" id="btnHistorico">Atualizar Histórico</button>
-</div>
-
-      <!-- Saldos -->
-<div class="container hidden" id="cantinaSaldos">
-  <h2>Saldos em dívida</h2>
-
-  <!-- Contêiner dos saldos por aluno -->
-  <div id="saldos"></div>
-
-  <!-- Botões para exportar Excel -->
-  <div style="margin-top: 15px;">
-    <button id="btnDownloadTodos">📥 Excel alunos + saldos</button>
-    <button id="btnDownloadHistorico">📥 Excel aluno + histórico + saldos</button>
+  <h2>➕ Criar Menu</h2>
+  <div style="width:100%;text-align:left;">
+    <label>📅 Data:</label>
+    <input id="dataMenu" type="date" style="width:100%;max-width:none;margin:0 0 20px 0;padding:12px 14px;border:2px solid #e0e0e0;">
+    
+    <label>🍽️ Tipo:</label>
+    <select id="tipoMenu" style="width:100%;max-width:none;margin:0 0 20px 0;padding:12px 14px;border:2px solid #e0e0e0;">
+      <option value="pequeno_almoco">🥐 Pequeno-almoço (2€)</option>
+      <option value="almoco">🍽️ Almoço (4€)</option>
+      <option value="jantar">🍲 Jantar (4€)</option>
+    </select>
+    
+    <label>🍳 Prato (apenas almoço):</label>
+    <input id="pratoMenu" placeholder="Ex: Frango com arroz" style="width:100%;max-width:none;margin:0 0 24px 0;padding:12px 14px;border:2px solid #e0e0e0;">
   </div>
-  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
-  <script src="js/app.js"></script>
+  
+  <button class="btn-full" id="btnAddMenu">✅ Adicionar Menu</button>
+  <button class="btn-back" onclick="menu()">Voltar</button>
 </div>
 
-<!-- ALUNO -->
+<!-- MENUS CRIADOS -->
+<div class="container hidden" id="cantinaMenus">
+  <h2>📋 Menus Criados</h2>
+  <div style="width:100%;text-align:left;margin-bottom:20px;">
+    <label style="margin-bottom:10px;">🔍 Filtrar por data (opcional):</label>
+    <input type="date" id="diaMenu" style="width:100%;max-width:none;margin:0;padding:12px 14px;border:2px solid #e0e0e0;">
+    <small style="display:block;margin-top:6px;color:#999;">Deixa vazio para ver todos os menus</small>
+  </div>
+  <div id="listaMenus"></div>
+  <button class="btn-back" onclick="menu()">Voltar</button>
+</div>
+
+<!-- RESERVAS DO DIA -->
+<div class="container hidden" id="cantinaReservas">
+  <h2>Reservas do Dia</h2>
+  <div id="reservasDia"></div>
+  <button class="btn-back" onclick="menu()">Voltar</button>
+</div>
+
+<!-- HISTÓRICO -->
+<div class="container hidden" id="cantinaHistorico">
+  <h2>📚 Histórico de Reservas</h2>
+  
+  <!-- Pesquisa e Filtros de Alunos (lista inicial) -->
+  <div class="alunos-pesquisa-box" id="alunosPesquisaBox" style="display: none;">
+    <div class="alunos-pesquisa">
+      <input 
+        type="text" 
+        id="pesquisaAlunos" 
+        placeholder="🔍 Pesquisar aluno por nome..." 
+        onkeyup="filtrarAlunos()"
+      />
+    </div>
+    <div class="alunos-info">
+      <span id="alunosContagemResultados"></span>
+    </div>
+  </div>
+  
+  <!-- Lista de Alunos -->
+  <div class="alunos-lista-container">
+    <div id="listaAlunosHistorico"></div>
+  </div>
+  
+  <!-- Filtros e Pesquisa do Histórico (mostrado ao selecionar um aluno) -->
+  <div class="historico-filtros-box" id="historicoFiltrosBox" style="display: none;">
+    <div class="historico-pesquisa">
+      <input 
+        type="text" 
+        id="pesquisaHistorico" 
+        placeholder="🔍 Pesquisar por prato..." 
+        onkeyup="filtrarHistorico()"
+      />
+    </div>
+    
+    <div class="historico-filters">
+      <select id="filtroTipoHistorico" onchange="filtrarHistorico()" class="filter-select">
+        <option value="">📋 Todos os tipos</option>
+        <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
+        <option value="almoco">🍽️ Almoço</option>
+        <option value="jantar">🌙 Jantar</option>
+        <option value="dieta">🥗 Dieta</option>
+      </select>
+      
+      <select id="filtroStatusHistorico" onchange="filtrarHistorico()" class="filter-select">
+        <option value="">✨ Todos os status</option>
+        <option value="ativa">✅ Ativa</option>
+        <option value="cancelada">❌ Cancelada</option>
+      </select>
+      
+      <button class="btn-filter-reset" onclick="resetarFiltrosHistorico()">🔄 Limpar</button>
+    </div>
+  </div>
+
+  <!-- Histórico do Aluno -->
+  <div id="historico"></div>
+  
+  <div class="botoes-historico">
+    <button class="btn-back" onclick="backToHistoricoList()" id="btnBackHistorico" style="display: none;">⬅️ Voltar a Alunos</button>
+    <button class="btn-back" onclick="menu()" id="btnBackMenu">Voltar</button>
+  </div>
+</div>
+
+<!-- SALDOS -->
+<div class="container hidden" id="cantinaSaldos">
+  <h2>Saldos em Dívida</h2>
+  
+  <!-- Caixa de Pesquisa e Filtros -->
+  <div class="saldos-filtros-box">
+    <div class="saldos-pesquisa">
+      <input 
+        type="text" 
+        id="pesquisaSaldos" 
+        placeholder="🔍 Pesquisar por nome..." 
+        onkeyup="filtrarSaldos()"
+      />
+    </div>
+    <div class="saldos-botoes-filtro">
+      <button class="btn-filter" onclick="ordenarSaldos('nome')" title="Ordenar A→Z">📝 Nome</button>
+      <button class="btn-filter" onclick="ordenarSaldos('valor')" title="Ordenar por valor">💰 Valor</button>
+      <button class="btn-filter" onclick="resetarFiltrosSaldos()" title="Limpar filtros">🔄 Limpar</button>
+    </div>
+  </div>
+
+  <!-- Caixa de Resultados -->
+  <div class="saldos-resultados-box">
+    <div id="listaSaldos"></div>
+  </div>
+  
+  <div class="acoes">
+    <button class="btn-medium" onclick="exportarSaldosExcel()">📥 Exportar Saldos</button>
+    <button class="btn-medium" onclick="abrirRelatorioMensal()">📊 Relatório Mensal</button>
+  </div>
+  <button class="btn-back" onclick="menu()">Voltar</button>
+</div>
+
+<!-- DETALHE SALDO ALUNO -->
+<div class="container hidden" id="cantinaSaldoAluno">
+  <h2 id="tituloAluno"></h2>
+  <div class="card-divida">
+    <span>Dívida Total</span>
+    <strong id="valorTotal">€0.00</strong>
+  </div>
+  <div id="mesesDivida"></div>
+  <button id="btnLiquidarTotal" class="btn-full danger hidden" onclick="liquidarDividaTotal(alunoAtual)">Liquidar Dívida Total</button>
+  <button class="btn-full" onclick="exportarHistoricoAluno()">📥 Exportar Histórico</button>
+  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
+</div>
+
+<!-- RELATÓRIO MENSAL -->
+<div class="container hidden" id="paginaRelatorio">
+  <h2>Relatório Mensal</h2>
+  <div class="filtros-relatorio">
+    <select id="relatorioAno"></select>
+    <select id="relatorioMes"></select>
+  </div>
+  <button onclick="prepararRelatorio()">📊 Preparar Relatório</button>
+  <button class="btn-full" onclick="gerarRelatorioMensal()">Gerar Excel</button>
+  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
+</div>
+
+<!-- ALUNO - MENU -->
 <div class="container hidden" id="alunoMenu">
   <h2>Reservar Menu</h2>
-
-  <div>
-    <label>Filtrar por tipo:</label>
-    <select id="filtroTipoAluno" onchange="showAlunoMenu()">
-      <option value="">Todos</option>
-      <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
-      <option value="almoco">🍽️ Almoço</option>
-      <option value="jantar">🍲 Jantar</option>
-      <option value="dieta">🥗 Dieta</option>
-    </select>
-  </div>
-
+  <label for="filtroTipoAluno">Filtrar por tipo:</label>
+  <select id="filtroTipoAluno" onchange="showAlunoMenu()">
+    <option value="">Todos</option>
+    <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
+    <option value="almoco">🍽️ Almoço</option>
+    <option value="jantar">🌙 Jantar</option>
+    <option value="dieta">🥗 Dieta</option>
+  </select>
   <div id="listaAlunoMenu"></div>
 </div>
 
+<!-- ALUNO - MINHAS RESERVAS -->
 <div class="container hidden" id="alunoReservas">
   <h2>Minhas Reservas</h2>
   <div id="minhasReservas"></div>
 </div>
 
-<script>
-
-/* ==============================
-   CONFIGURAÇÃO SUPABASE
-============================== */
-const SUPABASE_URL = "https://fghsgknistganzbuxrjt.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnaHNna25pc3RnYW56YnV4cmp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNDUzNjcsImV4cCI6MjA4MzgyMTM2N30.6NPsu-DeQuEpjnHptdZTgsYmtx7mQ5STs8zbwYgIoYY";
-const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-let currentUser = null;
-let role = null;
-
-/* ==============================
-   ELEMENTOS HTML
-============================== */
-const getEl = id => document.getElementById(id);
-
-const elements = {
-  login: getEl("login"),
-  email: getEl("email"),
-  password: getEl("password"),
-  btnLogin: getEl("btnLogin"),
-  menuSelect: getEl("menuSelect"),
-  menuTitle: getEl("menuTitle"),
-  buttons: getEl("buttons"),
-  saldoAluno: getEl("saldo"),
-  dataMenu: getEl("dataMenu"),
-  pratoMenu: getEl("pratoMenu"),
-  tipoMenu: getEl("tipoMenu"),
-  diaMenu: getEl("diaMenu"),
-  listaMenus: getEl("listaMenus"),
-  listaAlunoMenu: getEl("listaAlunoMenu"),
-  minhasReservas: getEl("minhasReservas"),
-  filtroAluno: getEl("filtroAluno"),
-  saldos: getEl("saldos"),
-  historico: getEl("historico")
-};
-
-/* ==============================
-   FUNÇÕES UTILITÁRIAS
-============================== */
-const show = id => {
-  document.querySelectorAll(".container").forEach(c => c.classList.add("hidden"));
-  getEl(id).classList.remove("hidden");
-};
-
-const addBack = id => {
-  const container = getEl(id);
-  if(container.querySelector(".btn-back")) return;
-  const btn = document.createElement("button");
-  btn.className = "btn-back";
-  btn.textContent = "Voltar";
-  btn.onclick = menu;
-  container.appendChild(btn);
-};
-
-const tipoEmoji = tipo => {
-  const map = {
-    pequeno_almoco: '🥐',
-    almoco: '🍽️',
-    jantar: '🍲',
-    dieta: '🥗'
-  };
-  return map[tipo] || '';
-};
-
-const formatCurrency = valor => `€${Number(valor).toFixed(2)}`;
-
-/* ==============================
-   LOGIN / LOGOUT
-============================== */
-async function login(){
-  const email = elements.email.value.trim().toLowerCase();
-  const password = elements.password.value;
-
-  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-  if(error){ alert("Erro login: " + error.message); return; }
-
-  currentUser = data.user;
-
-  // Verifica role
-  const { data: aluno } = await supabaseClient.from("alunos").select("*").eq("email", email);
-  if(aluno.length){ role = "aluno"; menu(); return; }
-
-  const { data: cantina } = await supabaseClient.from("cantina").select("*").eq("email", email);
-  if(cantina.length){ role = "cantina"; menu(); return; }
-
-  alert("Utilizador autenticado mas não existe em aluno/cantina");
-}
-
-async function logout(){
-  await supabaseClient.auth.signOut();
-  location.reload();
-}
-
-elements.btnLogin.addEventListener("click", login);
-document.addEventListener("keydown", e => {
-  if(e.key==="Enter" && !elements.login.classList.contains("hidden")) login();
-});
-
-/* ==============================
-   MENU PRINCIPAL
-============================== */
-async function menu(){
-  show("menuSelect");
-  elements.buttons.innerHTML = "";
-  elements.menuTitle.innerText = role==="aluno" ? "Área do Aluno" : "Área da Cantina";
-
-  if(role==="aluno"){
-    elements.buttons.innerHTML += `
-      <button class="btn-full" onclick="showAlunoMenu()">Reservar Menu</button>
-      <button class="btn-full" onclick="showAlunoReservas()">Minhas Reservas</button>
-    `;
-    await saldo();
-  } else {
-    elements.buttons.innerHTML += `
-      <button class="btn-full" onclick="showCantinaMenu()">Criar Menu</button>
-      <button class="btn-full" onclick="showCantinaMenus()">Menus Criados</button>
-      <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
-      <button class="btn-full" onclick="showCantinaHistorico()">Histórico</button>
-      <button class="btn-full" onclick="showCantinaSaldos()">Saldos</button>
-    `;
-  }
-}
-
-/* ==============================
-   SALDO ALUNO
-============================== */
-async function saldo(){
-  if(role!=="aluno") return;
-
-  const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", currentUser.email).single();
-  const { data: reservas } = await supabaseClient.from("reservas")
-    .select("preco")
-    .eq("aluno_id", aluno.id)
-    .eq("cancelada", false);
-
-  const total = reservas.reduce((sum,r) => sum + Number(r.preco), 0);
-  elements.saldoAluno.innerText = `Saldo: ${formatCurrency(total)}`;
-}
-
-/* =============================
-   CANTINA — CRIAR MENU
-============================= */
-function showCantinaMenu(){
-  show("cantinaMenu");
-  addBack("cantinaMenu");
-
-  // Garantir listener sempre atrelado
-  const btn = getEl("btnAddMenu");
-  if(btn) {
-    btn.onclick = addMenu;
-  }
-}
-
-async function addMenu(){
-  const dataValue = elements.dataMenu.value;
-  const tipo = elements.tipoMenu.value;
-  let prato = elements.pratoMenu.value.trim();
-
-  const refeicoes = {
-    pequeno_almoco: { preco: 2, pratoFixo: "Pão e Leite" },
-    almoco: { preco: 4, pratoFixo: null },
-    jantar: { preco: 4, pratoFixo: "" },
-    dieta: { preco: 4, pratoFixo: "" }
-  };
-
-  if(!refeicoes[tipo]){ alert("Tipo de refeição inválido"); return; }
-  if(tipo==="pequeno_almoco" && !prato) prato = refeicoes.pequeno_almoco.pratoFixo;
-  if(tipo==="almoco" && !prato){ alert("Preenche o prato do almoço"); return; }
-  if(!dataValue){ alert("Seleciona uma data"); return; }
-
-  const { data: menuCriado, error } = await supabaseClient.from("menus")
-    .insert({ data: dataValue, tipo, prato, preco: refeicoes[tipo].preco })
-    .select()
-    .single();
-
-  if(error){ alert(error.message); return; }
-
-  alert("Menu adicionado com sucesso!");
-  elements.dataMenu.value = "";
-  elements.pratoMenu.value = "";
-  elements.tipoMenu.value = "pequeno_almoco";
-
-  // Atualiza lista de menus criados
-  showCantinaMenus();
-}
-
-/* =============================
-   CANTINA — LISTAR MENUS CRIADOS
-============================= */
-function toggleDia(data){
-  const el = document.getElementById(`dia-${data}`);
-  if (el) el.classList.toggle("hidden");
-}
-
-async function showCantinaMenus(){
-  show("cantinaMenus");
-  addBack("cantinaMenus");
-
-  const { data: menus, error } = await supabaseClient
-    .from("menus")
-    .select("*")
-    .order("data", { ascending: true })
-    .order("tipo", { ascending: true });
-
-  if (error) {
-    alert(error.message);
-    return;
-  }
-
-  if (!menus || menus.length === 0) {
-    listaMenus.innerHTML = "<i>Não existem menus criados.</i>";
-    return;
-  }
-
-  // Agrupar menus por data
-  const menusPorDia = {};
-  menus.forEach(m => {
-    if (!menusPorDia[m.data]) menusPorDia[m.data] = [];
-    menusPorDia[m.data].push(m);
-  });
-
-  const hoje = new Date().toISOString().split("T")[0];
-
-  listaMenus.innerHTML = Object.entries(menusPorDia)
-    .map(([data, menusDia]) => `
-      <div class="menu-dia">
-        <h3 style="cursor:pointer" onclick="toggleDia('${data}')">
-          📅 ${data}
-        </h3>
-
-        <div id="dia-${data}" class="hidden">
-          ${menusDia.map(m => {
-            const podeEditar = m.data > hoje;
-            return `
-              <div class="menu-item">
-                <div>
-                  ${tipoEmoji(m.tipo)} <b>${m.tipo}</b>
-                  ${m.prato ? "— " + m.prato : ""}
-                  (€${m.preco})
-                </div>
-
-                ${podeEditar ? `
-                  <div>
-                    <button onclick="startEdit('${m.id}')">✏️</button>
-                    <button onclick="apagarMenu('${m.id}')">🗑️</button>
-                  </div>
-                ` : `<small>⛔ passado</small>`}
-              </div>
-
-              <div id="edit-${m.id}" class="hidden" style="margin-bottom:10px;">
-                <input id="input-prato-${m.id}" value="${m.prato || ""}">
-                <button onclick="saveEdit('${m.id}')">💾</button>
-                <button onclick="cancelEdit('${m.id}')">❌</button>
-              </div>
-            `;
-          }).join("")}
-        </div>
-      </div>
-    `)
-    .join("");
-}
-
-/* =============================
-   CANTINA — EDITAR/EXCLUIR MENU
-============================= */
-function startEdit(id){ getEl(`edit-${id}`).classList.remove('hidden'); }
-function cancelEdit(id){ getEl(`edit-${id}`).classList.add('hidden'); }
-
-async function saveEdit(id){
-  const novoPrato = getEl(`input-prato-${id}`).value.trim();
-  if(!novoPrato){ alert("O prato não pode estar vazio"); return; }
-  await supabaseClient.from("menus").update({ prato: novoPrato }).eq("id", id);
-  showCantinaMenus();
-}
-
-async function apagarMenu(id){
-  if(!confirm("Tens a certeza que queres apagar este menu?")) return;
-  await supabaseClient.from("menus").delete().eq("id", id);
-  showCantinaMenus();
-}
-
-/* =============================
-   CANTINA — RESERVAS
-============================= */
-async function showCantinaReservasHoje(){
-  show("cantinaReservas");
-  addBack("cantinaReservas");
-
-  const hoje = new Date().toISOString().slice(0,10);
-  const div = document.getElementById("reservasDia");
-
-  div.innerHTML = "A carregar reservas de hoje...";
-
-  const { data, error } = await supabaseClient
-      .from("reservas")
-      .select(`
-         id,
-          tipo,
-         alunos(nome)
-  `)
-     .eq("data", hoje)
-     .eq("cancelada", false);
-
-  if (error) {
-    div.innerHTML = error.message;
-    return;
-  }
-
-  const contagem = {
-    pequeno_almoco: 0,
-    almoco: 0,
-    jantar: 0,
-    dieta: 0
-  };
-
-  data.forEach(r => {
-    if (contagem[r.tipo] !== undefined) {
-      contagem[r.tipo]++;
-    }
-  });
-
-  div.innerHTML = `
-    <div class="refeicao" onclick="verDetalheRefeicao('pequeno_almoco')">
-      ☕ Pequeno-almoço — ${contagem.pequeno_almoco}
-    </div>
-    <div class="refeicao" onclick="verDetalheRefeicao('almoco')">
-      🍽️ Almoço — ${contagem.almoco}
-    </div>
-    <div class="refeicao" onclick="verDetalheRefeicao('jantar')">
-      🌙 Jantar — ${contagem.jantar}
-    </div>
-    <div class="refeicao" onclick="verDetalheRefeicao('dieta')">
-      🥗 Dieta — ${contagem.dieta}
-    </div>
-  `;
-}
-
-// Por refeição
-async function verDetalheRefeicao(tipo){
-  const hoje = new Date().toISOString().slice(0,10);
-  const div = document.getElementById("reservasDia");
-
-  div.innerHTML = "A carregar alunos...";
-
-  const { data, error } = await supabaseClient
-    .from("reservas")
-    .select("alunos ( nome )")
-    .eq("data", hoje)
-    .eq("tipo", tipo);
-
-  if (error) {
-    div.innerHTML = error.message;
-    return;
-  }
-
-  if (data.length === 0) {
-    div.innerHTML = "Sem reservas";
-    return;
-  }
-
-  div.innerHTML = `
-    <h3>${tipo.toUpperCase()}</h3>
-    ${data.map(r => `<div>${r.alunos.nome}</div>`).join("")}
-  `;
-}
-
-/* =============================
-   CANTINA — HISTÓRICO
-============================= */
-async function showCantinaHistorico(){
-  show("cantinaHistorico");
-  addBack("cantinaHistorico");
-
-  const div = document.getElementById("historico");
-  div.innerHTML = "A carregar alunos...";
-
-  const { data: alunos, error } = await supabaseClient
-    .from("alunos")
-    .select("id, nome")
-    .order("nome", { ascending: true });
-
-  if(error){ div.innerHTML = "Erro: " + error.message; return; }
-
-  if(!alunos || alunos.length===0){
-    div.innerHTML = "<i>Sem alunos cadastrados.</i>";
-    return;
-  }
-
-  div.innerHTML = alunos.map(a => `
-    <div class="aluno-card" onclick="showHistoricoAluno('${a.id}')">
-      👤 ${a.nome}
-    </div>
-  `).join("");
-}
-
-async function showHistoricoAluno(alunoId){
-  const div = document.getElementById("historico");
-  div.innerHTML = "A carregar histórico...";
-
-  const { data, error } = await supabaseClient
-    .from("reservas")
-    .select(`
-      id,
-      tipo,
-      data,
-      cancelada,
-      preco,
-      menus!inner(prato)
-    `)
-    .eq("aluno_id", alunoId)
-    .order("data", { ascending: false });
-
-  if(error){ div.innerHTML = "Erro: " + error.message; return; }
-
-  if(!data || data.length===0){
-    div.innerHTML = "<i>Sem histórico disponível para este aluno.</i>";
-    return;
-  }
-
-  // Agrupa por data
-  const grouped = {};
-  data.forEach(r => {
-    if(!grouped[r.data]) grouped[r.data] = [];
-    grouped[r.data].push(r);
-  });
-
-  div.innerHTML = Object.keys(grouped).sort((a,b)=>b.localeCompare(a)).map(d => {
-    const items = grouped[d].map(r => `
-      <div class="historico-item">
-        <div>
-          🍽️ <span class="tipo-refeicao tipo-${r.tipo}">${r.tipo.replace("_"," ")}</span> — ${r.menus?.prato || "-"}<br>
-          💰 €${r.preco.toFixed(2)}
-        </div>
-        <div class="${r.cancelada ? 'status-cancelada' : 'status-ativa'}">
-          ${r.cancelada ? '❌ Cancelada' : '✅ Ativa'}
-        </div>
-      </div>
-    `).join("");
-
-    return `
-      <div class="historico-card">
-        <div class="historico-data">📅 ${d}</div>
-        ${items}
-      </div>
-    `;
-  }).join("");
-}
-
-/* =============================
-   CANTINA — SALDOS
-============================= */
-/* ====================== SALDOS ====================== */
-async function showCantinaSaldos(){
-  show("cantinaSaldos");
-
-  const { data, error } = await supabaseClient
-    .from("reservas")
-    .select(`preco, aluno_id, alunos!inner(nome)`)
-    .eq("cancelada", false);
-
-  if(error){ alert(error.message); return; }
-
-  // Agrega saldo por aluno
-  const saldos = {};
-  data.forEach(r => {
-    const a = r.alunos;
-    if(!saldos[a.id]) saldos[a.id] = { nome: a.nome, total: 0 };
-    saldos[a.id].total += Number(r.preco);
-  });
-
-  const div = document.getElementById("saldos");
-  div.innerHTML = Object.keys(saldos).length === 0
-    ? "<i>Sem saldos em dívida.</i>"
-    : Object.keys(saldos).map(alunoId => {
-        const a = saldos[alunoId];
-        return `
-          <div class="aluno-saldo-card" onclick="showAlunoSaldoDetalhe('${alunoId}')">
-            <span>👤 ${a.nome}</span>
-            <span>€${a.total.toFixed(2)}</span>
-          </div>
-        `;
-      }).join("");
-}
-
-/* Drill-down: download Excel ou liquidar dívida */
-async function showAlunoSaldoDetalhe(alunoId){
-  const { data: aluno } = await supabaseClient
-    .from("alunos")
-    .select("nome")
-    .eq("id", alunoId)
-    .single();
-  if(!aluno) return alert("Aluno não encontrado");
-
-  const { data: reservas } = await supabaseClient
-    .from("reservas")
-    .select("preco")
-    .eq("aluno_id", alunoId)
-    .eq("cancelada", false);
-
-  const total = reservas.reduce((s,r)=>s+Number(r.preco),0);
-
-  const confirmOptions = confirm(`Aluno: ${aluno.nome}\nSaldo em dívida: €${total.toFixed(2)}\n\nDeseja: OK → Baixar Excel histórico, Cancel → Liquidar dívida?`);
-
-  if(confirmOptions){
-    downloadExcelAluno(alunoId);
-  } else {
-    liquidarDividaAluno(alunoId);
-  }
-}
-
-/* Download histórico Excel de um aluno */
-async function downloadExcelAluno(alunoId){
-  const { data: reservas } = await supabaseClient
-    .from("reservas")
-    .select(`data, tipo, preco, cancelada, menus!inner(prato)`)
-    .eq("aluno_id", alunoId)
-    .order("data", { ascending: true });
-
-  const rows = reservas.map(r => ({
-    Data: r.data,
-    Tipo: r.tipo,
-    Prato: r.menus?.prato || "-",
-    Preco: r.preco,
-    Status: r.cancelada ? "Cancelada" : "Ativa"
-  }));
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, "Histórico");
-  XLSX.writeFile(wb, `Historico_Aluno_${alunoId}.xlsx`);
-}
-
-/* Liquidar dívida do aluno */
-async function liquidarDividaAluno(alunoId){
-  if(!confirm("Tem certeza que quer apagar todo o histórico deste aluno? Esta ação é irreversível!")) return;
-
-  await supabaseClient.from("reservas").delete().eq("aluno_id", alunoId);
-
-  alert("Histórico apagado com sucesso!");
-  showCantinaSaldos();
-}
-
-/* Exportar Excel: todos os alunos (somente saldo) */
-document.getElementById("btnDownloadTodos").addEventListener("click", async () => {
-  const { data } = await supabaseClient
-    .from("reservas")
-    .select(`preco, alunos!inner(nome)`)
-    .eq("cancelada", false);
-
-  const aggregated = {};
-  data.forEach(r => {
-    const nome = r.alunos.nome;
-    if(!aggregated[nome]) aggregated[nome] = 0;
-    aggregated[nome] += r.preco;
-  });
-
-  const rows = Object.keys(aggregated).map(nome => ({
-    Aluno: nome,
-    Saldo: aggregated[nome]
-  }));
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, "Saldos");
-  XLSX.writeFile(wb, "Saldos_Todos_Alunos.xlsx");
-});
-
-/* Exportar Excel completo: todos os alunos + histórico */
-document.getElementById("btnDownloadHistorico").addEventListener("click", async () => {
-  const { data } = await supabaseClient
-    .from("reservas")
-    .select(`aluno_id, alunos!inner(nome), data, tipo, preco, cancelada, menus!inner(prato)`)
-    .order("data", { ascending: true });
-
-  const rows = data.map(r => ({
-    Aluno: r.alunos.nome,
-    Data: r.data,
-    Tipo: r.tipo,
-    Prato: r.menus?.prato || "-",
-    Preco: r.preco,
-    Status: r.cancelada ? "Cancelada" : "Ativa"
-  }));
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, "Histórico Completo");
-  XLSX.writeFile(wb, "Historico_Complete_Alunos.xlsx");
-});
-
-/* ==============================
-   ALUNO — LISTAR MENU E RESERVAR
-============================== */
-async function showAlunoMenu(){
-  const filtroTipo = document.getElementById("filtroTipoAluno")?.value || "";
-  show("alunoMenu"); addBack("alunoMenu");
-
-  const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", currentUser.email).single();
-  const { data: menus } = await supabaseClient.from("menus").select("*").order("data",{ascending:true});
-  const { data: reservas } = await supabaseClient.from("reservas")
-    .select("id,menu_id,tipo,data,cancelada")
-    .eq("aluno_id", aluno.id);
-
-  const reservasMap = {}; reservas.forEach(r=>reservasMap[r.menu_id]=r);
-  const hojeStr = new Date().toISOString().split("T")[0];
-  const hora = new Date().getHours();
-  const minuto = new Date().getMinutes();
-
-  elements.listaAlunoMenu.innerHTML = menus
-    .filter(m => m.tipo!=="almoco")
-    .filter(m => {
-      if(filtroTipo && m.tipo!==filtroTipo) return false;
-      const r = reservasMap[m.id];
-      if(r && !r.cancelada) return false;
-
-      const menuDataStr = new Date(m.data).toISOString().split("T")[0];
-      if(m.tipo==="pequeno_almoco" && (menuDataStr<hojeStr || (menuDataStr===hojeStr && (hora>9||(hora===9 && minuto>=30))))) return false;
-      if(m.tipo==="jantar" && (menuDataStr<hojeStr || (menuDataStr===hojeStr && hora>=12))) return false;
-      if(m.tipo==="dieta"){
-        const almocoCancelado = reservas.find(r=>r.tipo==="almoco" && r.data===menuDataStr && r.cancelada);
-        if(!almocoCancelado) return false;
-      }
-      return true;
-    })
-    .map(m=>`
-      <div class="menu">
-        <b>${m.tipo}</b> — ${m.data} ${m.prato? "- "+m.prato:""} (${formatCurrency(m.preco)})
-        <br>
-        <button class="btn-reservar" data-id="${m.id}" data-tipo="${m.tipo}" data-preco="${m.preco}" data-data="${m.data}">Reservar</button>
-      </div>
-    `).join("");
-
-  document.querySelectorAll(".btn-reservar").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
-      await reservarMenu(btn.dataset.id, parseFloat(btn.dataset.preco), btn.dataset.data, btn.dataset.tipo);
-    });
-  });
-
-  await saldo();
-}
-
-async function reservarMenu(menuId, preco, data, tipo){
-  const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", currentUser.email).single();
-
-  if(tipo==="dieta"){
-    const { data: almocoAtivo } = await supabaseClient.from("reservas")
-      .select("*")
-      .eq("aluno_id", aluno.id)
-      .eq("tipo","almoco")
-      .eq("data",data)
-      .eq("cancelada",false);
-
-    if(almocoAtivo.length>0){ alert("Só podes reservar Dieta se cancelares o almoço do mesmo dia"); return; }
-  }
-
-  await supabaseClient.from("reservas").insert({
-    aluno_id: aluno.id,
-    menu_id: menuId,
-    preco,
-    data,
-    tipo,
-    cancelada:false
-  });
-
-  alert("Reserva efetuada!");
-  showAlunoMenu(); showAlunoReservas(); saldo();
-}
-
-/* ==============================
-   ALUNO — MINHAS RESERVAS
-============================== */
-async function showAlunoReservas(){
-  show("alunoReservas"); addBack("alunoReservas");
-
-  const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", currentUser.email).single();
-  const { data: reservas } = await supabaseClient.from("reservas")
-    .select("id,data,tipo,preco,cancelada,menus!inner(prato)")
-    .eq("aluno_id", aluno.id)
-    .order("data",{ascending:true});
-
-  const agora = new Date(); const hojeStr = agora.toISOString().split("T")[0]; const hora = agora.getHours(); const minuto = agora.getMinutes();
-
-  elements.minhasReservas.innerHTML = reservas.map(r=>{
-    let podeCancelar = false;
-    if(!r.cancelada){
-      const rDataStr = new Date(r.data).toISOString().split("T")[0];
-      if(r.tipo==="pequeno_almoco"){ if(rDataStr>hojeStr) podeCancelar=true; else if(rDataStr===hojeStr && (hora<9||(hora===9 && minuto<30))) podeCancelar=true; }
-      if(r.tipo==="almoco"){ if(rDataStr>hojeStr) podeCancelar=true; else if(rDataStr===hojeStr && hora<9) podeCancelar=true; }
-      if(r.tipo==="jantar"){ if(rDataStr>hojeStr) podeCancelar=true; else if(rDataStr===hojeStr && hora<12) podeCancelar=true; }
-      if(r.tipo==="dieta") podeCancelar=false;
-    }
-    return `
-      <div class="menu">
-        <b>${r.tipo}</b> — ${r.data} ${r.menus?.prato? "- "+r.menus.prato:""} (${formatCurrency(r.preco)})<br>
-        ${r.cancelada? "❌ Cancelada":""}
-        ${podeCancelar? `<button class="btn-cancelar" data-id="${r.id}">Cancelar</button>`:(!r.cancelada? "⛔ Cancelamento indisponível":"")}
-      </div>
-    `;
-  }).join("");
-
-  document.querySelectorAll(".btn-cancelar").forEach(btn=>{
-    btn.addEventListener("click", async ()=>{
-      await supabaseClient.from("reservas").update({ cancelada:true }).eq("id",btn.dataset.id);
-      showAlunoReservas(); saldo();
-    });
-  });
-
-  await saldo();
-}
-
-</script>
+<!-- ALERTAS -->
+<div class="container hidden" id="alertasAluno">
+  <h2>Alertas</h2>
+  <div id="alertasDia"></div>
+</div>
 
 </body>
 </html>
