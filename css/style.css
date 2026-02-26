@@ -68,26 +68,128 @@
   padding:0;
 }
 
+html{
+  height:100%;
+}
+
+/* Camada de grelha animada por trás de tudo */
+html::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  z-index:-3;
+  opacity:0.35;
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(9,31,71,0.35) 0,
+      rgba(9,31,71,0.35) 1px,
+      transparent 1px,
+      transparent 32px
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      rgba(211,47,47,0.28) 0,
+      rgba(211,47,47,0.28) 1px,
+      transparent 1px,
+      transparent 32px
+    );
+  mix-blend-mode:soft-light;
+  transform:translate3d(0,0,0);
+  animation:bgGridDrift 38s linear infinite;
+  pointer-events:none;
+}
+
+@keyframes bgGridDrift{
+  0%   { transform:translate3d(0,0,0); }
+  50%  { transform:translate3d(-40px,-30px,0); }
+  100% { transform:translate3d(-80px,10px,0); }
+}
+
 body{
   font-family:'Segoe UI', 'Roboto', system-ui, -apple-system, sans-serif;
-  background:linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 50%, #dcdcdc 100%);
   color:var(--dark);
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
   min-height:100vh;
+  margin:0;
   padding:10px;
   display:flex;
-  align-items:center;
   justify-content:center;
+  align-items:center;
+  position:relative;
+  overflow-y:auto;
+}
+
+html{
+  min-height:100%;
+  background:
+    radial-gradient(circle at top left, rgba(211,47,47,0.18) 0%, transparent 55%),
+    radial-gradient(circle at bottom right, rgba(9,31,71,0.18) 0%, transparent 55%),
+    linear-gradient(135deg, #f7f7f8 0%, #e9eaec 50%, #dcdfe5 100%);
+  background-attachment: fixed;
+}
+
+/* Camadas animadas de fundo */
+body::before,
+body::after{
+  content:'';
+  position:fixed;
+  width:680px;
+  height:680px;
+  border-radius:50%;
+  opacity:0.42;
+  filter:blur(18px);
+  pointer-events:none;
+  z-index:-2;
+  mix-blend-mode:multiply;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.15) 0, transparent 55%),
+    conic-gradient(
+      from 0deg,
+      rgba(211,47,47,0.0) 0deg,
+      rgba(211,47,47,0.7) 85deg,
+      rgba(255,82,82,0.5) 140deg,
+      rgba(9,31,71,0.75) 220deg,
+      rgba(9,31,71,0.45) 280deg,
+      rgba(211,47,47,0.0) 340deg
+    );
+  animation:orbFloat 26s ease-in-out infinite alternate;
+}
+
+body::before{
+  top:-180px;
+  left:-140px;
+}
+
+body::after{
+  bottom:-220px;
+  right:-120px;
+  animation-delay:-13s;
+}
+
+@keyframes orbFloat{
+  0%{
+    transform:translate3d(0,0,0) rotate(0deg) scale(1.02);
+  }
+  35%{
+    transform:translate3d(60px,-30px,0) rotate(55deg) scale(1.09);
+  }
+  70%{
+    transform:translate3d(-45px,40px,0) rotate(135deg) scale(0.97);
+  }
+  100%{
+    transform:translate3d(25px,15px,0) rotate(190deg) scale(1.1);
+  }
 }
 
 .container{
-  max-width:920px;
-  width:92%;
-  background:linear-gradient(135deg, #ffffff 0%, #f9f9f9 100%);
+  max-width:880px;
+  width:94%;
+  background:linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(249,249,249,0.96) 100%);
   padding:28px;
   border-radius:16px;
-  box-shadow:0 20px 60px rgba(0,0,0,0.12), 0 0 1px rgba(0,0,0,0.05);
+  box-shadow:0 18px 45px rgba(0,0,0,0.14), 0 0 1px rgba(0,0,0,0.06);
   animation:slideIn 0.5s var(--trans) forwards;
   display:flex;
   flex-direction:column;
@@ -97,6 +199,7 @@ body{
   border-top:5px solid var(--primary);
   position:relative;
   overflow:hidden;
+  backdrop-filter:blur(12px);
 }
 
 .container::before {
@@ -130,7 +233,7 @@ body{
 }
 
 h1{
-  font-size:36px;
+  font-size:34px;
   font-weight:800;
   text-align:center;
   background:linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
@@ -143,7 +246,7 @@ h1{
 }
 
 h2{
-  font-size:26px;
+  font-size:24px;
   font-weight:800;
   text-align:center;
   background:linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
@@ -288,8 +391,8 @@ button:active {
 }
 
 .btn-full:hover {
-  box-shadow:0 8px 24px rgba(211,47,47,0.35);
-  transform:translateY(-3px);
+  box-shadow:0 10px 26px rgba(211,47,47,0.35);
+  transform:translateY(-3px) scale(1.01);
 }
 
 .btn-full.danger {
@@ -830,6 +933,7 @@ button:active {
   box-shadow:0 2px 8px rgba(211,47,47,0.08);
   border:2px solid rgba(211,47,47,0.1);
   z-index:0;
+  max-width:420px;
 }
 
 #saldo:hover {
@@ -1297,6 +1401,9 @@ label::before {
     padding:20px;
     border-radius:var(--br);
     border-top:3px solid var(--primary);
+  }
+  #login::after{
+    display:none;
   }
   input,select,button{
     width:100%!important;
@@ -1943,6 +2050,20 @@ label::before {
   align-items: center;
   justify-content: center;
   gap: 24px;
+  padding-top: 8px;
+}
+
+/* Títulos das áreas com subtom */
+#alunoMenuTitle::after,
+#cantinaMenuTitle::after {
+  content: 'Gestão de refeições';
+  display:block;
+  margin-top:4px;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:0.05em;
+  text-transform:uppercase;
+  color:var(--gray);
 }
 
 #alunoMenuSelect > h2,

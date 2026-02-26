@@ -1,0 +1,7 @@
+-corriger aquele erro visual que aparece no telemovel na parte de login no ::after
+-mudar a maneira como as refeicoes já criadas sao mostradas a colocar a ultimas criadas primeiro 
+com a possibilidade de ver as que ainda podem ser modificadas e dps as que ja nao podem 
+separadamente em baixo na emsma pagina
+-mudar a maneira como se mkostra o mes para passar a ser o mes escrito em vez do numero
+- se o erro for que a pessoa jao nao pode cancelar mais rfeicoes deve ser um pop up de erro a mostrar isso
+e a explicar tambem.
