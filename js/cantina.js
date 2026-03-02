@@ -222,6 +222,17 @@ function renderMenusFiltrados() {
       const ehHoje = data === hojeStr;
       let diaTemEditaveis = false;
 
+      // Ordenar por tipo: pequeno_almoco → almoco → jantar
+        const ordemTipos = {
+          pequeno_almoco: 1,
+          almoco: 2,
+          jantar: 3
+        };
+
+        menusDia.sort((a, b) => {
+          return ordemTipos[a.tipo] - ordemTipos[b.tipo];
+        });
+
       const menusHtml = menusDia.map(m => {
 
         const tipo = escapeHtml(m.tipo || "");
@@ -253,12 +264,12 @@ function renderMenusFiltrados() {
               podeEditar
                 ? `
                 <div class="menu-item-actions">
-                  ${
-                    tipo === "almoco"
-                      ? `<button class="btn-edit" onclick="startEdit('${m.id}')">✏️ Editar</button>`
-                      : ""
-                  }
-                  <button class="btn-delete" onclick="apagarMenu('${m.id}')">🗑️ Apagar</button>
+                  <button class="btn-edit" onclick="startEdit('${m.id}')">
+                    ✏️ Editar
+                  </button>
+                  <button class="btn-delete" onclick="apagarMenu('${m.id}')">
+                    🗑️ Apagar
+                  </button>
                 </div>
               `
                 : `<div class="menu-item-bloqueado">⛔ Bloqueado</div>`
@@ -308,9 +319,20 @@ function renderMenusFiltrados() {
    CANTINA — EDITAR / APAGAR MENU
 ============================= */
 
-function startEdit(id) {
-  const el = document.getElementById(`edit-${id}`);
-  if (el) el.classList.remove("hidden");
+async function startEdit(id) {
+  const menu = window.todosOsMenus.find(m => m.id == id);
+  if (!menu) {
+    mostrarErro("Erro", "Menu não encontrado.");
+    return;
+  }
+
+  const novoPrato = await modalEditarPrato(menu.prato);
+
+  if (!novoPrato) return;
+
+  if (!validarInput(novoPrato, "Prato")) return;
+
+  await saveEdit(id, novoPrato);
 }
 
 function cancelEdit(id) {
@@ -318,21 +340,7 @@ function cancelEdit(id) {
   if (el) el.classList.add("hidden");
 }
 
-async function saveEdit(id) {
-  console.log("💾 Salvando edição do menu:", id);
-
-  const input = document.getElementById(`input-prato-${id}`);
-  if (!input) {
-    mostrarMensagem("error", "❌ Erro ao acceder ao campo de edição.");
-    console.error("❌ Input não encontrado para menu:", id);
-    return;
-  }
-
-  const novoPrato = input.value.trim();
-  if (!validarInput(novoPrato, "prato")) {
-    return;
-  }
-
+async function saveEdit(id, novoPrato) {
   showLoading("⏳ Atualizando prato...");
 
   try {
@@ -347,7 +355,6 @@ async function saveEdit(id) {
     }
 
     mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!");
-    console.log("✅ Menu atualizado:", id);
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao atualizar prato");

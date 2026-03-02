@@ -212,8 +212,8 @@ function showModal(config) {
         const btnClass = btn.type === 'primary' ? 'modal-button-primary' :
                         btn.type === 'danger' ? 'modal-button-danger' :
                         btn.type === 'success' ? 'modal-button-success' :
-                        'modal-button-secondary';
-        html += `<button class="modal-button ${btnClass}" onclick="window.modalResolve('${btn.resolve}')">${btn.text}</button>`;
+                        'modal-button-secondary';html += `<button class="modal-button ${btnClass}" data-resolve="${btn.resolve}">${btn.text}</button>`;
+        
       });
     }
     
@@ -223,10 +223,13 @@ function showModal(config) {
     document.body.appendChild(overlay);
     
     // Resolver modal
-    window.modalResolve = (result) => {
-      overlay.remove();
-      resolve(result);
-    };
+    modal.querySelectorAll('.modal-button').forEach(button => {
+  button.addEventListener('click', () => {
+    const value = button.dataset.resolve === 'true';
+    overlay.remove();
+    resolve(value);
+  });
+});
     
     // Fechar ao clicar fora
     overlay.addEventListener('click', (e) => {
@@ -278,6 +281,73 @@ function mostrarSucesso(titulo, mensagem, timeout = 2000) {
   return promise;
 }
 
+function modalEditarPrato(pratoAtual) {
+  return new Promise((resolve) => {
+    const existingOverlay = document.querySelector('.modal-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-content modal-warning';
+
+    modal.innerHTML = `
+      <div class="modal-header">
+        <span>✏️</span>
+        <div class="modal-title">Editar Prato</div>
+      </div>
+
+      <div class="modal-message">
+        <input 
+          type="text" 
+          id="modalInputPrato" 
+          value="${pratoAtual || ""}"
+          style="width:100%;padding:10px;border-radius:8px;border:1px solid #ccc;margin-top:10px;"
+        />
+      </div>
+
+      <div class="modal-buttons">
+        <button class="modal-button modal-button-secondary" data-action="cancel">
+          Cancelar
+        </button>
+        <button class="modal-button modal-button-primary" data-action="save">
+          Guardar
+        </button>
+      </div>
+    `;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    const input = modal.querySelector("#modalInputPrato");
+    input.focus();
+
+    modal.querySelectorAll(".modal-button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const action = btn.dataset.action;
+
+        if (action === "cancel") {
+          overlay.remove();
+          resolve(null);
+        }
+
+        if (action === "save") {
+          const valor = input.value.trim();
+          overlay.remove();
+          resolve(valor);
+        }
+      });
+    });
+
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) {
+        overlay.remove();
+        resolve(null);
+      }
+    });
+  });
+}
 // Modal de Erro
 function mostrarErro(titulo, mensagem) {
   return showModal({
@@ -415,7 +485,7 @@ async function menu(){
     `;
     await saldo();
   } else {
-    // Menu da Cantina (sem saldo)
+    // Menu da Cantina
     elements.cantinaMenuSelect.classList.remove("hidden");
     elements.cantinaMenuTitle.innerText = "Área da Cantina";
     elements.cantinButtons.innerHTML = `
@@ -423,7 +493,7 @@ async function menu(){
       <button class="btn-full" onclick="showMenusCriados()">Menus Criados</button>
       <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
       <button class="btn-full" onclick="showCantinaHistorico()">Histórico</button>
-      <button class="btn-full" onclick="showCantinaSaldos()">Saldos</button>
+      <button class="btn-full" onclick="showCantinaSaldos()">Saldos em Dívida</button>
     `;
   }
 }
@@ -445,7 +515,7 @@ async function saldo(){
 
     const total = (reservas || []).reduce((sum,r) => sum + Number(r.preco), 0);
     if(elements.saldoAluno) {
-      elements.saldoAluno.innerText = `Saldo: ${formatCurrency(total)}`;
+      elements.saldoAluno.innerText = `Saldo em Dívida: ${formatCurrency(total)}`;
     } else {
       const saldoEl = document.getElementById("saldo");
       if(saldoEl) {
