@@ -118,15 +118,29 @@ function toggleDiaAluno(data) {
 ============================== */
 
 async function reservarAluno(menuId, preco, data, is_dieta, tipo) {
-  showLoading("⏳ Processando reserva...");
-
   try {
     const aluno = await getAlunoAtual();
 
-    if(await alunoTemDivida(aluno.id)){
-      mostrarMensagem("warning", "⚠️ Tens pagamentos em atraso. Não podes fazer reservas.");
-      return;
+    const temDivida = await alunoTemDivida(aluno.id);
+
+    if (temDivida) {
+      const continuar = await showModal({
+        icon: "💳",
+        title: "Pagamentos em Atraso",
+        message: "Tens pagamentos em atraso. Pretendes continuar com a reserva mesmo assim?",
+        type: "warning",
+        buttons: [
+          { text: "Cancelar", type: "secondary", resolve: false },
+          { text: "Continuar", type: "danger", resolve: true }
+        ]
+      });
+
+      if (!continuar) {
+        return; // sai sem mostrar loading
+      }
     }
+
+    //showLoading("⏳ Processando reserva...");
 
     const { error } = await supabaseClient
       .from("reservas")
@@ -140,15 +154,17 @@ async function reservarAluno(menuId, preco, data, is_dieta, tipo) {
         cancelada: false
       });
 
-    if(error){
+    if (error) {
       handleError(error, "Erro ao criar reserva");
       return;
     }
 
-    mostrarSucesso("Reserva Confirmada", "Reserva efetuada com sucesso!");
+    await mostrarSucesso("Reserva Confirmada", "Reserva efetuada com sucesso!");
+
     showAlunoMenu();
     showAlunoReservas();
     saldo();
+
   } catch (err) {
     handleError(err, "Erro inesperado ao fazer reserva");
   } finally {

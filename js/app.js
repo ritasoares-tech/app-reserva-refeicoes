@@ -224,12 +224,12 @@ function showModal(config) {
     
     // Resolver modal
     modal.querySelectorAll('.modal-button').forEach(button => {
-  button.addEventListener('click', () => {
+    button.addEventListener('click', () => {
     const value = button.dataset.resolve === 'true';
     overlay.remove();
     resolve(value);
+    });
   });
-});
     
     // Fechar ao clicar fora
     overlay.addEventListener('click', (e) => {
@@ -258,27 +258,39 @@ function confirmar(titulo, mensagem, texto_sim = '✅ Sim', texto_nao = '❌ Nã
 
 // Modal de Sucesso
 function mostrarSucesso(titulo, mensagem, timeout = 2000) {
-  const promise = showModal({
-    icon: '✅',
-    title: titulo,
-    message: mensagem,
-    type: 'success',
-    buttons: [
-      { text: 'Fechar', type: 'success', resolve: true }
-    ],
-    canClose: false
-  });
-  
-  if (timeout > 0) {
-    setTimeout(() => {
-      const overlay = document.querySelector('.modal-overlay');
-      if (overlay) {
-        overlay.remove();
+  return new Promise((resolve) => {
+
+    let resolvido = false;
+
+    showModal({
+      icon: '✅',
+      title: titulo,
+      message: mensagem,
+      type: 'success',
+      buttons: [
+        { text: 'Fechar', type: 'success', resolve: true }
+      ],
+      canClose: false
+    }).then((value) => {
+      if (!resolvido) {
+        resolvido = true;
+        resolve(value);
       }
-    }, timeout);
-  }
-  
-  return promise;
+    });
+
+    if (timeout > 0) {
+      setTimeout(() => {
+        const overlay = document.querySelector('.modal-overlay');
+        if (overlay) overlay.remove();
+
+        if (!resolvido) {
+          resolvido = true;
+          resolve(true); // 🔥 resolve quando fecha automaticamente
+        }
+      }, timeout);
+    }
+
+  });
 }
 
 function modalEditarPrato(pratoAtual) {

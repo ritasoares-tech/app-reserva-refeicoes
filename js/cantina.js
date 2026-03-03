@@ -70,31 +70,50 @@ async function addMenu() {
 
   showLoading("⏳ Criando menu...");
 
-  try {
-    console.log("🌐 Enviando para Supabase...", { dataValue, tipo, prato, preco: configuracao[tipo].preco });
-    
-    const { data, error } = await supabaseClient
-      .from("menus")
-      .insert([{
-        data: dataValue,
-        tipo,
-        prato,
-        preco: configuracao[tipo].preco
-      }]);
+  // 🔎 Verificar se já existe menu do mesmo tipo neste dia
+  const { data: existente, error: erroCheck } = await supabaseClient
+    .from("menus")
+    .select("id")
+    .eq("data", dataValue)
+    .eq("tipo", tipo)
+    .limit(1);
 
-    if (error) {
-      handleError(error, "Erro ao criar menu");
+    if (erroCheck) {
+      handleError(erroCheck, "Erro ao verificar menu existente");
       return;
     }
 
-    mostrarSucesso("Menu Criado", "Menu criado com sucesso!");
-    console.log("✅ Menu criado com sucesso", data);
+    if (existente && existente.length > 0) {
+      mostrarMensagem("warning", "⚠️ Já existe este tipo de menu neste dia.");
+      hideLoading();
+      return;
+    }
 
-    document.getElementById("dataMenu").value = "";
-    document.getElementById("pratoMenu").value = "";
-    document.getElementById("tipoMenu").value = "pequeno_almoco";
+    try {
+      console.log("🌐 Enviando para Supabase...", { dataValue, tipo, prato, preco: configuracao[tipo].preco });
+      
+      const { data, error } = await supabaseClient
+        .from("menus")
+        .insert([{
+          data: dataValue,
+          tipo,
+          prato,
+          preco: configuracao[tipo].preco
+        }]);
 
-    showMenusCriados();
+      if (error) {
+        handleError(error, "Erro ao criar menu");
+        return;
+      }
+
+      mostrarSucesso("Menu Criado", "Menu criado com sucesso!");
+      console.log("✅ Menu criado com sucesso", data);
+
+      document.getElementById("dataMenu").value = "";
+      document.getElementById("pratoMenu").value = "";
+      document.getElementById("tipoMenu").value = "pequeno_almoco";
+
+      showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao criar menu");
   } finally {

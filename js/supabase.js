@@ -11,7 +11,6 @@ function initSupabase() {
   
   const client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   window.supabaseClient = client;
-  window.supabase = client;
   console.log("✅ Supabase inicializado com sucesso");
 }
 
