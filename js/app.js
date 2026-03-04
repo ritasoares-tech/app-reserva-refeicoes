@@ -514,29 +514,89 @@ async function menu(){
    SALDO ALUNO
 ============================== */
 async function saldo(){
-  if(role!="aluno") return;
+  if(role !== "aluno") return;
 
   try {
     const aluno = await getAlunoAtual();
-    
-    const { data: reservas, error: reservasError } = await supabaseClient.from("reservas").select("preco").eq("aluno_id", aluno.id).eq("cancelada", false);
-    if(reservasError) {
-      handleError(reservasError, "Erro ao buscar reservas");
+
+    const { data: reservas, error } = await supabaseClient
+      .from("reservas")
+      .select("preco, data")
+      .eq("aluno_id", aluno.id)
+      .eq("cancelada", false);
+
+    if(error){
+      handleError(error, "Erro ao buscar reservas");
       return;
     }
 
-    const total = (reservas || []).reduce((sum,r) => sum + Number(r.preco), 0);
-    if(elements.saldoAluno) {
-      elements.saldoAluno.innerText = `Saldo em Dívida: ${formatCurrency(total)}`;
-    } else {
-      const saldoEl = document.getElementById("saldo");
-      if(saldoEl) {
-        saldoEl.innerText = `Saldo: ${formatCurrency(total)}`;
-      }
+    if(!reservas || reservas.length === 0){
+      elements.saldoAluno.innerHTML = "Sem valores em dívida.";
+      return;
     }
-    console.log("✅ Saldo atualizado", total);
+
+    let total = 0;
+    const porMes = {};
+
+    reservas.forEach(r => {
+      total += Number(r.preco);
+
+      const d = new Date(r.data);
+      const key = `${d.getFullYear()}-${d.getMonth()+1}`;
+      porMes[key] = (porMes[key] || 0) + Number(r.preco);
+    });
+
+    const nomesMeses = [
+      "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+    ];
+
+    const hoje = new Date();
+    const anoAtual = hoje.getFullYear();
+    const mesAtual = hoje.getMonth();
+
+    const mesesOrdenados = Object.entries(porMes).sort((a,b)=>{
+      const [anoA, mesA] = a[0].split("-");
+      const [anoB, mesB] = b[0].split("-");
+      return new Date(anoB, mesB-1) - new Date(anoA, mesA-1);
+    });
+
+    let html = "";
+
+    mesesOrdenados.forEach(([key, valor]) => {
+      const [ano, mes] = key.split("-");
+      const anoNum = Number(ano);
+      const mesNum = Number(mes) - 1;
+
+      const nomeMes = nomesMeses[mesNum];
+
+      const mesCorrente = anoNum === anoAtual && mesNum === mesAtual;
+      const mesAnterior = new Date(anoNum, mesNum) < new Date(anoAtual, mesAtual);
+
+      let etiqueta = "";
+      if(mesCorrente) etiqueta = " (Mês Atual)";
+      else if(mesAnterior) etiqueta = "⚠️ (Em Dívida)";
+      else etiqueta = "📅";
+
+      html += `
+        <div style="margin-bottom:6px;">
+          <b>${nomeMes} ${ano}</b> ${etiqueta}
+          <span style="float:right">${formatCurrency(valor)}</span>
+        </div>
+      `;
+    });
+
+    html += `
+      <hr style="margin:8px 0;">
+      <div>
+        <b>Total em Dívida:</b>
+        <span style="float:right">${formatCurrency(total)}</span>
+      </div>
+    `;
+
+    elements.saldoAluno.innerHTML = html;
+
   } catch (err) {
     handleError(err, "Erro ao calcular saldo");
   }
 }
-

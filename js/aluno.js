@@ -3,6 +3,10 @@
 /* ==============================
    ALUNO — MENU POR DATA E RESERVAS
 ============================== */
+function formatarData(dataISO) {
+  const [ano, mes, dia] = dataISO.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
 
 async function showAlunoMenu() {
   show("alunoMenu");
@@ -26,16 +30,13 @@ async function showAlunoMenu() {
       return;
     }
 
-    const filtroTipoSelect = document.getElementById("filtroTipoAluno");
-    const tipoFiltro = filtroTipoSelect ? filtroTipoSelect.value : "";
-
     let menus = menusRaw || [];
-    if (tipoFiltro) {
-      if (tipoFiltro === "dieta") {
-        menus = menus.filter(m => m.tipo === "almoco");
-      } else {
-        menus = menus.filter(m => m.tipo === tipoFiltro);
-      }
+
+    const filtroDataInput = document.getElementById("filtroDataAluno");
+    const dataSelecionada = filtroDataInput?.value;
+
+    if (dataSelecionada) {
+      menus = menus.filter(m => m.data === dataSelecionada);
     }
 
     const { data: reservas } = await supabaseClient
@@ -62,7 +63,7 @@ async function showAlunoMenu() {
 
     listaAlunoMenuEl.innerHTML = Object.entries(porData).map(([data, menusDia]) => `
       <div class="menu-dia">
-        <h3 style="cursor:pointer" onclick="toggleDiaAluno('${data}')">📅 ${data}</h3>
+        <h3 style="cursor:pointer" onclick="toggleDiaAluno('${data}')">📅 ${formatarData(data)}</h3>
         <div id="aluno-dia-${data}" class="hidden">
         ${menusDia.map(m => {
           if(reservasAtivas[m.id]) return "";
@@ -269,7 +270,11 @@ async function showAlunoReservas(){
           (${formatCurrency(r.preco)})
           <br>
           ${r.cancelada ? "❌ Cancelada" : ""}
-          ${podeDieta && !r.is_dieta ? `<button onclick="trocarParaDieta('${r.id}', '${keyMes}')">🥗 Dieta</button>` : ""}
+          ${podeDieta && !r.is_dieta ? `
+            <button onclick="trocarParaDieta('${r.id}')">
+              🥗 Escolher Dieta
+            </button>
+          ` : ""}
           ${podeCancelar ? `<button onclick="cancelarReserva('${r.id}', '${keyMes}')">Cancelar</button>` : ""}
           ${mostrarAvisoLimite ? `<button class="btn-medium danger" style="margin-top:8px;" onclick="mostrarLimiteCancelamentos()">⚠️ Já atingiste o limite de cancelamentos</button>` : ""}
         </div>
@@ -319,12 +324,14 @@ async function cancelarReserva(reservaId, keyMes) {
   }
 }
 
-async function trocarParaDieta(reservaId, keyMes) {
-  if (!await confirmar("Mudar para Dieta", "Deseja trocar esta refeição para dieta?")) {
+async function trocarParaDieta(reservaId) {
+  if (!await confirmar(
+    "Alterar para Dieta",
+    "Depois de escolher dieta não poderá voltar a alterar. Deseja continuar?"
+  )) {
     return;
   }
 
-  showLoading("⏳ Atualizando refeição...");
 
   try {
     const { error } = await supabaseClient
@@ -333,18 +340,19 @@ async function trocarParaDieta(reservaId, keyMes) {
       .eq("id", reservaId);
 
     if (error) {
-      hideLoading();
-      const mensagemErro = error?.message || "Erro ao atualizar para dieta";
-      await mostrarErro("Erro ao Atualizar Refeição", mensagemErro);
+      await mostrarErro("Erro ao Atualizar", error.message);
       return;
     }
 
-    mostrarSucesso("Refeição Alterada", "Refeição alterada para dieta!");
+    await mostrarSucesso(
+      "Refeição Alterada",
+      "Almoço alterado para dieta com sucesso!"
+    );
+
     showAlunoReservas();
+
   } catch (error) {
-    hideLoading();
-    const mensagemErro = error?.message || "Erro inesperado ao atualizar refeição";
-    await mostrarErro("Erro", mensagemErro);
+    await mostrarErro("Erro", error.message || "Erro inesperado");
   } finally {
     hideLoading();
   }

@@ -212,14 +212,8 @@
 <!-- ALUNO - MENU -->
 <div class="container hidden" id="alunoMenu">
   <h2>Reservar Menu</h2>
-  <label for="filtroTipoAluno">Filtrar por tipo:</label>
-  <select id="filtroTipoAluno" onchange="showAlunoMenu()">
-    <option value="">Todos</option>
-    <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
-    <option value="almoco">🍽️ Almoço</option>
-    <option value="jantar">🌙 Jantar</option>
-    <option value="dieta">🥗 Dieta</option>
-  </select>
+  <label><b>📅 Escolher Data:</b></label>
+  <input type="date" id="filtroDataAluno" onchange="showAlunoMenu()" />
   <div id="listaAlunoMenu"></div>
 </div>
 

@@ -202,7 +202,7 @@ body::after{
   backdrop-filter:blur(12px);
 }
 
-.container::before {
+/*.container::before {
   content:'';
   position:absolute;
   top:-50%;
@@ -214,7 +214,7 @@ body::after{
   pointer-events:none;
   z-index:0;
 }
-
+*/
 .container > * {
   position:relative;
   z-index:1;
