@@ -173,3 +173,79 @@ $$;
 -- =====================================================
 -- FIM DO SCHEMA
 -- =====================================================
+
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.alunos (
+  id uuid NOT NULL,
+  nome text NOT NULL,
+  email text NOT NULL UNIQUE,
+  criado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT alunos_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.cantina (
+  id uuid NOT NULL,
+  nome text NOT NULL,
+  email text NOT NULL UNIQUE,
+  criado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT cantina_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.menus (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  data date NOT NULL,
+  tipo text NOT NULL,
+  prato text NOT NULL,
+  preco numeric NOT NULL,
+  criado_por uuid,
+  criado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT menus_pkey PRIMARY KEY (id),
+  CONSTRAINT menus_criado_por_fkey FOREIGN KEY (criado_por) REFERENCES public.cantina(id)
+);
+CREATE TABLE public.meses_em_divida (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL,
+  ano integer NOT NULL,
+  mes integer NOT NULL,
+  data date NOT NULL,
+  total numeric NOT NULL,
+  criado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT meses_em_divida_pkey PRIMARY KEY (id),
+  CONSTRAINT meses_em_divida_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id)
+);
+CREATE TABLE public.meses_liquidados (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL,
+  ano integer NOT NULL,
+  mes integer NOT NULL,
+  valor_pago numeric NOT NULL,
+  liquidado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT meses_liquidados_pkey PRIMARY KEY (id),
+  CONSTRAINT meses_liquidados_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id)
+);
+CREATE TABLE public.relatorios_mensais (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  ano integer NOT NULL,
+  mes integer NOT NULL,
+  criado_em timestamp with time zone DEFAULT now(),
+  criado_por uuid,
+  total_receita numeric,
+  total_divida numeric,
+  CONSTRAINT relatorios_mensais_pkey PRIMARY KEY (id),
+  CONSTRAINT relatorios_mensais_criado_por_fkey FOREIGN KEY (criado_por) REFERENCES public.cantina(id)
+);
+CREATE TABLE public.reservas (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  aluno_id uuid NOT NULL,
+  menu_id uuid NOT NULL,
+  tipo text NOT NULL,
+  data date NOT NULL,
+  preco numeric NOT NULL,
+  cancelada boolean DEFAULT false,
+  automatico boolean DEFAULT false,
+  is_dieta boolean DEFAULT false,
+  criado_em timestamp with time zone DEFAULT now(),
+  CONSTRAINT reservas_pkey PRIMARY KEY (id),
+  CONSTRAINT reservas_aluno_id_fkey FOREIGN KEY (aluno_id) REFERENCES public.alunos(id),
+  CONSTRAINT reservas_menu_id_fkey FOREIGN KEY (menu_id) REFERENCES public.menus(id)
+);

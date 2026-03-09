@@ -1274,6 +1274,7 @@ label::before {
   position:relative;
   overflow:hidden;
   animation:slideUp 0.4s ease-out;
+  gap: 10px;
 }
 
 .mes-divida::before {

@@ -86,7 +86,7 @@
 <!-- HISTÓRICO -->
 <div class="container hidden" id="cantinaHistorico">
   <h2>📚 Histórico de Reservas</h2>
-  
+  <h2 id="NomeAluno"></h2>
   <!-- Pesquisa e Filtros de Alunos (lista inicial) -->
   <div class="alunos-pesquisa-box" id="alunosPesquisaBox" style="display: none;">
     <div class="alunos-pesquisa">
@@ -107,37 +107,8 @@
     <div id="listaAlunosHistorico"></div>
   </div>
   
-  <!-- Filtros e Pesquisa do Histórico (mostrado ao selecionar um aluno) -->
-  <div class="historico-filtros-box" id="historicoFiltrosBox" style="display: none;">
-    <div class="historico-pesquisa">
-      <input 
-        type="text" 
-        id="pesquisaHistorico" 
-        placeholder="🔍 Pesquisar por prato..." 
-        onkeyup="filtrarHistorico()"
-      />
-    </div>
-    
-    <div class="historico-filters">
-      <select id="filtroTipoHistorico" onchange="filtrarHistorico()" class="filter-select">
-        <option value="">📋 Todos os tipos</option>
-        <option value="pequeno_almoco">🥐 Pequeno-almoço</option>
-        <option value="almoco">🍽️ Almoço</option>
-        <option value="jantar">🌙 Jantar</option>
-        <option value="dieta">🥗 Dieta</option>
-      </select>
-      
-      <select id="filtroStatusHistorico" onchange="filtrarHistorico()" class="filter-select">
-        <option value="">Todos os status</option>
-        <option value="ativa">✅ Ativa</option>
-        <option value="cancelada">❌ Cancelada</option>
-      </select>
-      
-      <button class="btn-filter-reset" onclick="resetarFiltrosHistorico()">🔄 Limpar</button>
-    </div>
-  </div>
-
   <!-- Histórico do Aluno -->
+   
   <div id="historico"></div>
   
   <div class="botoes-historico">
@@ -148,7 +119,7 @@
 
 <!-- SALDOS -->
 <div class="container hidden" id="cantinaSaldos">
-  <h2>Saldos em Dívida</h2>
+  <h2>Valores em Dívida</h2>
   
   <!-- Caixa de Pesquisa e Filtros -->
   <div class="saldos-filtros-box">
@@ -160,11 +131,7 @@
         onkeyup="filtrarSaldos()"
       />
     </div>
-    <div class="saldos-botoes-filtro">
-      <button class="btn-filter" onclick="ordenarSaldos('nome')" title="Ordenar A→Z">📝 Nome</button>
-      <button class="btn-filter" onclick="ordenarSaldos('valor')" title="Ordenar por valor">💰 Valor</button>
-      <button class="btn-filter" onclick="resetarFiltrosSaldos()" title="Limpar filtros">🔄 Limpar</button>
-    </div>
+    
   </div>
 
   <!-- Caixa de Resultados -->
@@ -173,7 +140,7 @@
   </div>
   
   <div class="acoes">
-    <button class="btn-medium" onclick="exportarSaldosExcel()">📥 Exportar Saldos em Dívida</button>
+    <button class="btn-medium" onclick="exportarSaldosExcel()">📥 Exportar Valores em Dívida</button>
     <button class="btn-medium" onclick="abrirRelatorioMensal()">📊 Relatório Mensal</button>
   </div>
   <button class="btn-back" onclick="menu()">Voltar</button>

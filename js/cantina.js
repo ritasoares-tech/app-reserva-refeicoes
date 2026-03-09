@@ -192,13 +192,15 @@ async function showMenusCriados() {
 }
 
 function formatarTipoRefeicao(tipo) {
-  const tipos = {
+
+  const nomes = {
     pequeno_almoco: "Pequeno-almoço",
     almoco: "Almoço",
+    dieta: "Dieta",
     jantar: "Jantar"
   };
 
-  return tipos[tipo] || tipo;
+  return nomes[tipo] || tipo;
 }
 
 function renderMenusFiltrados() {
@@ -451,24 +453,41 @@ async function showCantinaReservasHoje() {
   reservasHoje = data || [];
 
   reservasHojePorTipo = {
-  pequeno_almoco: [],
-  almoco: [],
-  jantar: []
+    pequeno_almoco: [],
+    almoco: [],
+    dieta: [],
+    jantar: []
   };
 
   reservasHoje.forEach(r => {
-  reservasHojePorTipo[r.tipo]?.push(r);
+
+    if (r.tipo === "almoco" && r.is_dieta) {
+      reservasHojePorTipo.dieta.push(r);
+    }
+    else if (r.tipo === "almoco") {
+      reservasHojePorTipo.almoco.push(r);
+    }
+    else {
+      reservasHojePorTipo[r.tipo]?.push(r);
+    }
+
   });
 
   div.innerHTML = `
     <div class="refeicao" onclick="verDetalheRefeicao('pequeno_almoco')">
-      ☕ Pequeno-almoço — ${reservasHojePorTipo.pequeno_almoco.length}
+      Pequeno-almoço — ${reservasHojePorTipo.pequeno_almoco.length}
     </div>
+
     <div class="refeicao" onclick="verDetalheRefeicao('almoco')">
-      🍽️ Almoço — ${reservasHojePorTipo.almoco.length}
+      Almoço — ${reservasHojePorTipo.almoco.length}
     </div>
+
+    <div class="refeicao" onclick="verDetalheRefeicao('dieta')">
+      Dieta — ${reservasHojePorTipo.dieta.length}
+    </div>
+
     <div class="refeicao" onclick="verDetalheRefeicao('jantar')">
-      🌙 Jantar — ${reservasHojePorTipo.jantar.length}
+      Jantar — ${reservasHojePorTipo.jantar.length}
     </div>
   `;
 }
@@ -495,6 +514,7 @@ async function alunoTemDivida(alunoId) {
 }
 
 function verDetalheRefeicao(tipo) {
+
   const div = document.getElementById("reservasDia");
   const lista = reservasHojePorTipo[tipo] || [];
 
@@ -502,7 +522,7 @@ function verDetalheRefeicao(tipo) {
     div.innerHTML = `
       <h3>${formatarTipoRefeicao(tipo)}</h3>
       <i>Sem reservas</i>
-      <br><button onclick="showCantinaReservasHoje()">⬅️ Voltar as Reservas de Hoje</button>
+      <br><button onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
     `;
     return;
   }
@@ -512,11 +532,10 @@ function verDetalheRefeicao(tipo) {
     ${lista.map(r => `
       <div>
         👤 ${r.alunos.nome}
-        ${r.is_dieta ? "🥗 (Dieta)" : ""}
       </div>
     `).join("")}
     <br>
-    <button onclick="showCantinaReservasHoje()">⬅️ Voltar as Reservas de Hoje</button>
+    <button onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
   `;
 }
 
@@ -535,7 +554,6 @@ async function showCantinaHistorico() {
   show("cantinaHistorico");
 
   document.getElementById("alunosPesquisaBox").style.display = "block";
-  document.getElementById("historicoFiltrosBox").style.display = "none";
   document.getElementById("historico").innerHTML = "";
   document.getElementById("btnBackHistorico").style.display = "none";
   document.getElementById("btnBackMenu").style.display = "inline-block";
@@ -609,7 +627,6 @@ async function showHistoricoAluno(alunoId, alunoNome) {
 
   document.getElementById("alunosPesquisaBox").style.display = "none";
   document.getElementById("listaAlunosHistorico").innerHTML = "";
-  document.getElementById("historicoFiltrosBox").style.display = "block";
   document.getElementById("btnBackHistorico").style.display = "inline-block";
   document.getElementById("btnBackMenu").style.display = "none";
 
@@ -639,31 +656,13 @@ async function showHistoricoAluno(alunoId, alunoNome) {
     div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem histórico disponível para este aluno.</div>";
     return;
   }
-
+  
+  document.getElementById("NomeAluno").innerText = alunoNome;
   historicoAtual = reservas;
   historicoFiltrado = [...reservas];
-
-  document.getElementById("pesquisaHistorico").value = "";
-  document.getElementById("filtroTipoHistorico").value = "";
-  document.getElementById("filtroStatusHistorico").value = "";
-
-  exibirHistoricoFiltrado();
+  exibirHistoricoFiltrado()
 }
 
-function filtrarHistorico() {
-  const pesquisa = document.getElementById("pesquisaHistorico").value.toLowerCase();
-  const tipo = document.getElementById("filtroTipoHistorico").value;
-  const status = document.getElementById("filtroStatusHistorico").value;
-
-  historicoFiltrado = historicoAtual.filter(r => {
-    const pratoMatches = !pesquisa || (r.menus?.prato || "").toLowerCase().includes(pesquisa);
-    const tipoMatches = !tipo || r.tipo === tipo;
-    const statusMatches = !status || (status === "ativa" ? !r.cancelada : r.cancelada);
-    return pratoMatches && tipoMatches && statusMatches;
-  });
-
-  exibirHistoricoFiltrado();
-}
 
 function exibirHistoricoFiltrado() {
   const div = document.getElementById("historico");
@@ -730,9 +729,9 @@ let alunoAtual = null;
 async function showCantinaSaldos() {
   show("cantinaSaldos");
   const div = document.getElementById("listaSaldos");
-  div.innerHTML = "⏳ A carregar saldos...";
+  div.innerHTML = "⏳ A carregar valores em dívida...";
 
-  showLoading("⏳ Carregando saldos...");
+  showLoading("⏳ Carregando valores em dívida...");
 
   try {
     const { data, error } = await supabaseClient
@@ -741,7 +740,7 @@ async function showCantinaSaldos() {
       .eq("cancelada", false);
 
     if (error) {
-      handleError(error, "Erro ao carregar saldos");
+      handleError(error, "Erro ao carregar Valores em Dívida");
       div.innerHTML = "<i>❌ Erro ao carregar dados.</i>";
       return;
     }
@@ -786,7 +785,7 @@ function renderizarSaldos() {
   const div = document.getElementById("listaSaldos");
   
   if(!saldosFiltrados || saldosFiltrados.length === 0) {
-    div.innerHTML = "<i>❌ Nenhum saldo encontrado.</i>";
+    div.innerHTML = "<i>❌ Nenhum aluno com valor em dívida encontrado.</i>";
     return;
   }
 
@@ -842,6 +841,207 @@ async function showSaldoAluno(alunoId) {
   showLoading("⏳ Carregando dados...");
 
   try {
+    // Primeiro, verificar diretamente as reservas do aluno para debug
+    console.log('🔍 DEBUG: Verificando reservas do aluno ID:', alunoId);
+    const { data: todasReservas, error: erroReservas } = await supabaseClient
+      .from("reservas")
+      .select("data, preco, cancelada, tipo, id")
+      .eq("aluno_id", alunoId)
+      .order("data", { ascending: false });
+
+    console.log('🔍 DEBUG: Todas as reservas do aluno:', todasReservas);
+    console.log('🔍 DEBUG: Erro reservas:', erroReservas);
+    console.log('🔍 DEBUG: Total de reservas encontradas:', todasReservas?.length || 0);
+
+    // Verificar reservas não canceladas
+    const reservasNaoCanceladas = todasReservas?.filter(r => !r.cancelada) || [];
+    console.log('🔍 DEBUG: Reservas não canceladas:', reservasNaoCanceladas);
+    console.log('🔍 DEBUG: Total de reservas não canceladas:', reservasNaoCanceladas.length);
+
+    // Calcular total manualmente para verificação
+    const totalManual = reservasNaoCanceladas.reduce((sum, r) => sum + Number(r.preco), 0);
+    console.log('🔍 DEBUG: Total manual calculado:', totalManual);
+
+    // Se não há reservas não canceladas, mostrar detalhes
+    if (reservasNaoCanceladas.length === 0 && todasReservas && todasReservas.length > 0) {
+      console.log('🔍 DEBUG: Todas as reservas estão canceladas!');
+      console.log('🔍 DEBUG: Detalhes das reservas canceladas:', 
+        todasReservas.map(r => ({ data: r.data, preco: r.preco, cancelada: r.cancelada })));
+    }
+
+    // Usar função original que funciona com as reservas
+    console.log('🔍 Buscando dívida por mês com RPC...');
+    const { data: dividas, error } = await supabaseClient
+      .rpc('obter_divida_por_mes', { p_aluno_id: alunoId });
+
+    console.log('🔍 DEBUG: Erro RPC:', error);
+    console.log('🔍 DEBUG: Resultado RPC:', dividas);
+
+    if (error) {
+      console.error("Erro ao buscar dívida por mês:", error);
+      handleError(error, "Erro ao carregar dívidas do aluno");
+      return;
+    }
+
+    console.log('🔍 Dívidas encontradas pela RPC:', dividas);
+
+    if (!dividas || dividas.length === 0) {
+      console.log('📋 Nenhuma dívida encontrada pela função RPC');
+      
+      // Se há reservas não canceladas mas RPC não retorna, há problema na função
+      if (reservasNaoCanceladas.length > 0) {
+        console.log('⚠️ ALERTA: Há reservas não canceladas mas a RPC não retornou dívidas!');
+        console.log('⚠️ Verificando se a função RPC está correta...');
+        
+        // Tentar calcular dívida manualmente e mostrar
+        const porMes = {};
+        reservasNaoCanceladas.forEach(r => {
+          const data = new Date(r.data);
+          const chave = `${data.getFullYear()}-${data.getMonth() + 1}`;
+          if (!porMes[chave]) {
+            porMes[chave] = { ano: data.getFullYear(), mes: data.getMonth() + 1, valor: 0 };
+          }
+          porMes[chave].valor += Number(r.preco);
+        });
+        
+        console.log('🔍 DEBUG: Dívida calculada manualmente por mês:', porMes);
+        
+        // Mostrar dívida manualmente calculada
+        const dividasManuais = Object.values(porMes);
+        if (dividasManuais.length > 0) {
+          console.log('🔄 Usando dívida calculada manualmente...');
+          await mostrarDividaManual(alunoId, dividasManuais);
+          return;
+        }
+      }
+      
+      document.getElementById("tituloAluno").innerText = "Sem dívidas";
+      document.getElementById("valorTotal").innerText = "€0.00";
+      document.getElementById("mesesDivida").innerHTML = "";
+      document.getElementById("btnLiquidarTotal").style.display = "none";
+      return;
+    }
+
+    // Continuar com o fluxo normal se a RPC funcionou
+    await processarDividasEncontradas(alunoId, dividas);
+
+  } catch (err) {
+    console.error("Erro ao processar dados do aluno:", err);
+    handleError(err, "Erro ao carregar dados do aluno");
+  } finally {
+    hideLoading();
+  }
+}
+
+// Função auxiliar para mostrar dívida calculada manualmente
+async function mostrarDividaManual(alunoId, dividas) {
+  // Obter nome do aluno
+  const { data: aluno } = await supabaseClient
+    .from("alunos")
+    .select("nome")
+    .eq("id", alunoId)
+    .single();
+
+  if (aluno && aluno.nome) {
+    document.getElementById("tituloAluno").innerText = aluno.nome;
+  } else {
+    document.getElementById("tituloAluno").innerText = "Aluno";
+  }
+
+  // Calcular total
+  const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
+  document.getElementById("valorTotal").innerText = `€${total.toFixed(2)}`;
+
+  // Exibir meses em dívida
+  const mesesDivida = document.getElementById("mesesDivida");
+  mesesDivida.innerHTML = "";
+
+  const nomesMeses = [
+    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+  ];
+
+  dividas.forEach(item => {
+    const nomeMes = nomesMeses[item.mes - 1];
+    const emAtraso = new Date() > new Date(item.ano, item.mes, 15);
+
+    mesesDivida.innerHTML += `
+      <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
+        <span>${nomeMes} ${item.ano} ${emAtraso ? '⚠️ ATRASO' : ''}</span>
+        <strong>€${Number(item.valor).toFixed(2)}</strong>
+        <button onclick="liquidarMes('${alunoId}', ${item.ano}, ${item.mes})">
+          Liquidar mês
+        </button>
+      </div>
+    `;
+  });
+
+  // Mostrar botão de liquidar total
+  const btnLiquidar = document.getElementById("btnLiquidarTotal");
+  btnLiquidar.classList.remove("hidden");
+  btnLiquidar.style.display = "block";
+}
+
+// Função auxiliar para processar dívidas encontradas
+async function processarDividasEncontradas(alunoId, dividas) {
+  // Obter nome do aluno
+  console.log('🔍 Buscando nome do aluno...');
+  const { data: aluno } = await supabaseClient
+    .from("alunos")
+    .select("nome")
+    .eq("id", alunoId)
+    .single();
+
+  console.log('👤 Aluno encontrado:', aluno);
+  if (aluno && aluno.nome) {
+    document.getElementById("tituloAluno").innerText = aluno.nome;
+    console.log('✅ Nome do aluno definido no título:', aluno.nome);
+  } else {
+    document.getElementById("tituloAluno").innerText = "Aluno";
+    console.log('⚠️ Nome do aluno não encontrado, usando padrão');
+  }
+
+  // Calcular total
+  const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
+  console.log('💰 Total calculado:', total);
+  document.getElementById("valorTotal").innerText = `€${total.toFixed(2)}`;
+
+  // Exibir meses em dívida
+  const mesesDivida = document.getElementById("mesesDivida");
+  mesesDivida.innerHTML = "";
+
+  const nomesMeses = [
+    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+  ];
+
+  console.log('📅 Processando meses em dívida...');
+  dividas.forEach(item => {
+    const nomeMes = nomesMeses[item.mes - 1];
+    const emAtraso = item.em_atraso;
+
+    console.log(`📊 Mês: ${nomeMes} ${item.ano}, Valor: €${item.valor}, Atraso: ${emAtraso}`);
+
+    mesesDivida.innerHTML += `
+      <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
+        <span>${nomeMes} ${item.ano} ${emAtraso ? '⚠️ ATRASO' : ''}</span>
+        <strong>€${Number(item.valor).toFixed(2)}</strong>
+        <button onclick="liquidarMes('${alunoId}', ${item.ano}, ${item.mes})">
+          Liquidar mês
+        </button>
+      </div>
+    `;
+  });
+
+  // Mostrar botão de liquidar total
+  const btnLiquidar = document.getElementById("btnLiquidarTotal");
+  btnLiquidar.classList.remove("hidden");
+  btnLiquidar.style.display = "block";
+}
+
+// Função de fallback caso a nova função não exista
+async function carregarSaldoAlunoFallback(alunoId) {
+  try {
     const { data: reservas, error } = await supabaseClient
       .from("reservas")
       .select("data, preco, alunos(nome)")
@@ -857,6 +1057,7 @@ async function showSaldoAluno(alunoId) {
       document.getElementById("tituloAluno").innerText = "Sem registros";
       document.getElementById("valorTotal").innerText = "€0.00";
       document.getElementById("mesesDivida").innerHTML = "";
+      document.getElementById("btnLiquidarTotal").style.display = "none";
       return;
     }
 
@@ -868,7 +1069,7 @@ async function showSaldoAluno(alunoId) {
     reservas.forEach(r => {
       total += Number(r.preco);
       const d = new Date(r.data);
-      const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       porMes[key] = (porMes[key] || 0) + Number(r.preco);
     });
 
@@ -884,22 +1085,22 @@ async function showSaldoAluno(alunoId) {
       return new Date(anoB, mesB - 1) - new Date(anoA, mesA - 1);
     });
 
+    const nomesMeses = [
+      "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+    ];
+
     mesesOrdenados.forEach(([key, valor]) => {
       const [ano, mes] = key.split("-");
-      const limite = new Date(ano, mes, 15);
+      const limite = new Date(parseInt(ano), parseInt(mes) - 1, 15);
       const emAtraso = hoje > limite;
-      const nomesMeses = [
-        "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-        "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
-      ];
-      const idxMes = Number(mes) - 1;
-      const nomeMes = nomesMeses[idxMes] || mes;
+      const nomeMes = nomesMeses[parseInt(mes) - 1];
 
       mesesDivida.innerHTML += `
         <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
           <span>${nomeMes} ${ano} ${emAtraso ? '⚠️ ATRASO' : ''}</span>
           <strong>€${valor.toFixed(2)}</strong>
-          <button onclick="liquidarMes('${alunoId}', ${ano}, ${mes})">
+          <button onclick="liquidarMes('${alunoId}', ${ano}, ${parseInt(mes)})">
             Liquidar mês
           </button>
         </div>
@@ -909,10 +1110,9 @@ async function showSaldoAluno(alunoId) {
     const btnLiquidar = document.getElementById("btnLiquidarTotal");
     btnLiquidar.classList.remove("hidden");
     btnLiquidar.style.display = "block";
+
   } catch (err) {
     handleError(err, "Erro ao processar dados do aluno");
-  } finally {
-    hideLoading();
   }
 }
 
@@ -936,34 +1136,53 @@ async function liquidarDividaTotal(alunoId) {
   showLoading("⏳ Liquidando dívida...");
 
   try {
-    const { data, error } = await supabaseClient.rpc('liquidar_divida_aluno', {
-      p_aluno_id: alunoId,
-      p_mes: null,
-      p_ano: null
-    });
+    // Para liquidar tudo, precisamos primeiro buscar todos os meses em dívida
+    const { data: dividas, error: erroDividas } = await supabaseClient
+      .rpc('obter_divida_por_mes', { p_aluno_id: alunoId });
 
-    if (error) {
-      console.error("❌ Erro ao liquidar dívida:", error);
-      handleError(error, "Erro ao liquidar dívida");
+    if (erroDividas) {
+      console.error("❌ Erro ao buscar dívidas:", erroDividas);
+      handleError(erroDividas, "Erro ao buscar dívidas");
       return;
     }
 
-    if (data && !data.success) {
-      mostrarErro("Erro", data.erro || "Erro ao liquidar dívida");
-      return;
-    }
-
-    const registrosDeleted = data?.registros_deletados || 0;
-    if (registrosDeleted === 0) {
+    if (!dividas || dividas.length === 0) {
       mostrarInfo("Sem dívida", "Este aluno não tem dívidas");
+      return;
+    }
+
+    // Liquidar cada mês individualmente
+    let totalLiquidado = 0;
+    let mesesLiquidados = 0;
+
+    for (const divida of dividas) {
+      const { data: resultado, error } = await supabaseClient.rpc('liquidar_mes_divida', {
+        p_aluno_id: alunoId,
+        p_ano: divida.ano,
+        p_mes: divida.mes
+      });
+
+      if (!error && resultado && resultado.length > 0) {
+        const res = resultado[0];
+        if (res.success && Number(res.valor_liquidado) > 0) {
+          totalLiquidado += Number(res.valor_liquidado);
+          mesesLiquidados++;
+        }
+      }
+    }
+
+    if (mesesLiquidados === 0) {
+      mostrarInfo("Sem dívida", "Este aluno não tem dívidas para liquidar");
     } else {
-      mostrarSucesso("Dívida Liquidada", `Dívida liquidada com sucesso! (${registrosDeleted} reserva${registrosDeleted !== 1 ? 's' : ''})`);
+      mostrarSucesso("Dívida Liquidada", 
+        `Dívida liquidada com sucesso! (${mesesLiquidados} mês${mesesLiquidados !== 1 ? 'es' : ''}) - Valor: €${totalLiquidado.toFixed(2)}`);
     }
     
     console.log("✅ Dívida liquidada para aluno:", alunoId);
     
+    // Recarregar dados do aluno
     setTimeout(() => {
-      showCantinaSaldos();
+      showSaldoAluno(alunoId);
     }, 1500);
     
   } catch (err) {
@@ -975,17 +1194,24 @@ async function liquidarDividaTotal(alunoId) {
 }
 
 async function liquidarMes(alunoId, ano, mes) {
-  if (!await confirmar("Liquidar Mês", `Deseja liquidar o mês ${mes}/${ano}?`)) {
+  const nomesMeses = [
+    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
+    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
+  ];
+  const nomeMes = nomesMeses[mes - 1];
+  
+  if (!await confirmar("Liquidar Mês", `Deseja liquidar o mês ${nomeMes} ${ano}?`)) {
     return;
   }
 
   showLoading("⏳ Liquidando mês...");
 
   try {
-    const { data, error } = await supabaseClient.rpc('liquidar_divida_aluno', {
+    // Usar a função nova que funciona corretamente
+    const { data, error } = await supabaseClient.rpc('liquidar_mes_divida', {
       p_aluno_id: alunoId,
-      p_mes: mes,
-      p_ano: ano
+      p_ano: ano,
+      p_mes: mes
     });
 
     if (error) {
@@ -994,19 +1220,30 @@ async function liquidarMes(alunoId, ano, mes) {
       return;
     }
 
-    if (data && !data.success) {
-      mostrarErro("Erro", data.erro || "Erro ao liquidar mês");
-      return;
-    }
+    if (data && data.length > 0) {
+      const resultado = data[0];
+      console.log('🔍 Resultado da liquidação:', resultado);
+      
+      if (!resultado.success) {
+        mostrarErro("Erro", resultado.message || "Erro ao liquidar mês");
+        return;
+      }
 
-    const registrosDeleted = data?.registros_deletados || 0;
-    if (registrosDeleted === 0) {
-      mostrarInfo("Sem registros", `Nenhuma dívida encontrada para o mês ${mes}/${ano}`);
-    } else {
-      mostrarSucesso("Mês Liquidado", `Mês ${mes}/${ano} liquidado com sucesso! (${registrosDeleted} reserva${registrosDeleted !== 1 ? 's' : ''})`);
+      if (Number(resultado.valor_liquidado) === 0) {
+        mostrarInfo("Sem dívida", `Não há dívidas para ${nomeMes} ${ano}`);
+      } else {
+        mostrarSucesso("Mês Liquidado", 
+          `${nomeMes} ${ano} liquidado com sucesso! Valor: €${Number(resultado.valor_liquidado).toFixed(2)}`);
+      }
     }
     
-    showSaldoAluno(alunoId);
+    console.log(`✅ Mês ${mes}/${ano} liquidado para aluno:`, alunoId);
+    
+    // Recarregar dados do aluno
+    setTimeout(() => {
+      showSaldoAluno(alunoId);
+    }, 1500);
+    
   } catch (err) {
     console.error("❌ Erro exception:", err);
     handleError(err, "Erro ao liquidar mês");
@@ -1153,7 +1390,7 @@ function exportarRelatorioExcel(dados, ano, mes) {
 ============================= */
 
 async function exportarSaldosExcel() {
-  console.log("📥 Iniciando exportação de saldos...");
+  console.log("📥 Iniciando exportação de valores em dívidas...");
   
   const { data, error } = await supabaseClient
     .from("reservas")
@@ -1161,8 +1398,8 @@ async function exportarSaldosExcel() {
     .eq("cancelada", false);
 
   if (error) {
-    mostrarErro("Erro", "Erro ao buscar saldos: " + error.message);
-    console.error("❌ Erro ao buscar saldos", error);
+    mostrarErro("Erro", "Erro ao buscar valores em dívida: " + error.message);
+    console.error("❌ Erro ao buscar valores em dívida", error);
     return;
   }
 
@@ -1208,11 +1445,11 @@ async function exportarSaldosExcel() {
     { wch: 15 }
   ];
 
-  XLSX.utils.book_append_sheet(wb, ws, "Saldos");
+  XLSX.utils.book_append_sheet(wb, ws, "Valores em dívida");
 
   const agora = new Date();
   const data_hora = `${agora.getDate()}-${String(agora.getMonth() + 1).padStart(2, '0')}-${agora.getFullYear()}_${String(agora.getHours()).padStart(2, '0')}h${String(agora.getMinutes()).padStart(2, '0')}`;
-  const nomeFicheiro = `saldos_${data_hora}.xlsx`;
+  const nomeFicheiro = `valores_em_divida_${data_hora}.xlsx`;
   
   XLSX.writeFile(wb, nomeFicheiro);
   console.log("✅ Ficheiro exportado:", nomeFicheiro);
