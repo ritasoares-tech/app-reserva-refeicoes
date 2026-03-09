@@ -1207,7 +1207,6 @@ label {
 }
 
 label::before {
-  content:'→';
   opacity:0.6;
   font-weight:900;
 }

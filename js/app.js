@@ -67,7 +67,6 @@ function loadElements() {
     dataMenu: getEl("dataMenu"),
     pratoMenu: getEl("pratoMenu"),
     tipoMenu: getEl("tipoMenu"),
-    diaMenu: getEl("diaMenu"),
     listaMenus: getEl("listaMenus"),
     btnAddMenu: getEl("btnAddMenu"),
     listaAlunoMenu: getEl("listaAlunoMenu"),
@@ -575,7 +574,7 @@ async function saldo(){
 
       let etiqueta = "";
       if(mesCorrente) etiqueta = " (Mês Atual)";
-      else if(mesAnterior) etiqueta = "⚠️ (Em Dívida)";
+      else if(mesAnterior) etiqueta = " ⚠️ (Em Dívida)";
       else etiqueta = "📅";
 
       html += `

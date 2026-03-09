@@ -72,11 +72,6 @@
 <!-- MENUS CRIADOS -->
 <div class="container hidden" id="cantinaMenus">
   <h2>Menus Criados</h2>
-  <div style="width:100%;text-align:left;margin-bottom:20px;">
-    <label style="margin-bottom:10px;">🔍 Filtrar por data (opcional):</label>
-    <input type="date" id="diaMenu" style="width:100%;max-width:none;margin:0;padding:12px 14px;border:2px solid #e0e0e0;">
-    <small style="display:block;margin-top:6px;color:#999;">Deixa vazio para ver todos os menus</small>
-  </div>
   <div id="listaMenus"></div>
   <button class="btn-back" onclick="menu()">Voltar</button>
 </div>
@@ -133,7 +128,7 @@
       </select>
       
       <select id="filtroStatusHistorico" onchange="filtrarHistorico()" class="filter-select">
-        <option value="">✨ Todos os status</option>
+        <option value="">Todos os status</option>
         <option value="ativa">✅ Ativa</option>
         <option value="cancelada">❌ Cancelada</option>
       </select>

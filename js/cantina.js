@@ -1,5 +1,11 @@
 // Funções da área da cantina (menus, reservas, histórico, saldos, relatórios)
 
+function formatarData(dataISO) {
+  if (!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
 /* ==============================
    CANTINA — NAVEGAÇÃO BASE
 ============================== */
@@ -156,12 +162,7 @@ async function showMenusCriados() {
   show("cantinaMenus");
   showLoading("⏳ Carregando menus...");
 
-  const diaMenuInput = document.getElementById("diaMenu");
-
-  if (diaMenuInput && !diaMenuInput.dataset.listenerAdded) {
-    diaMenuInput.addEventListener("change", renderMenusFiltrados);
-    diaMenuInput.dataset.listenerAdded = "true";
-  }
+  
 
   try {
     const { data: menus, error } = await supabaseClient
@@ -190,18 +191,25 @@ async function showMenusCriados() {
   }
 }
 
+function formatarTipoRefeicao(tipo) {
+  const tipos = {
+    pequeno_almoco: "Pequeno-almoço",
+    almoco: "Almoço",
+    jantar: "Jantar"
+  };
+
+  return tipos[tipo] || tipo;
+}
+
 function renderMenusFiltrados() {
   const container = document.getElementById("listaMenus");
   if (!container) return;
 
-  const diaMenuInput = document.getElementById("diaMenu");
-  const dataFiltro = diaMenuInput?.value || "";
+  
+
 
   let menusFiltrados = window.todosOsMenus || [];
 
-  if (dataFiltro) {
-    menusFiltrados = menusFiltrados.filter(m => m.data === dataFiltro);
-  }
 
   if (!menusFiltrados.length) {
     container.innerHTML = `
@@ -273,7 +281,7 @@ function renderMenusFiltrados() {
                 ${tipoEmoji(tipo)}
               </span>
               <div>
-                <b>${tipo.replace(/_/g, " ")}</b>
+                <b>${formatarTipoRefeicao(tipo)}</b>
                 ${prato ? `<span class="prato"> — ${prato}</span>` : ""}
                 <span class="preco">€${preco}</span>
               </div>
@@ -305,7 +313,7 @@ function renderMenusFiltrados() {
             <span class="chevron-${data}" style="margin-left:auto;transition:transform 0.3s;display:inline-block;transform:rotate(180deg);">▼</span>
           </h3>
 
-          <div id="dia-${data}">
+          <div id="dia-${data}" class=hidden>
             ${menusHtml}
           </div>
         </div>
@@ -443,18 +451,13 @@ async function showCantinaReservasHoje() {
   reservasHoje = data || [];
 
   reservasHojePorTipo = {
-    pequeno_almoco: [],
-    almoco: [],
-    jantar: [],
-    dieta: []
+  pequeno_almoco: [],
+  almoco: [],
+  jantar: []
   };
 
   reservasHoje.forEach(r => {
-    if (r.tipo === "almoco" && r.is_dieta) {
-      reservasHojePorTipo.dieta.push(r);
-    } else {
-      reservasHojePorTipo[r.tipo]?.push(r);
-    }
+  reservasHojePorTipo[r.tipo]?.push(r);
   });
 
   div.innerHTML = `
@@ -463,9 +466,6 @@ async function showCantinaReservasHoje() {
     </div>
     <div class="refeicao" onclick="verDetalheRefeicao('almoco')">
       🍽️ Almoço — ${reservasHojePorTipo.almoco.length}
-    </div>
-    <div class="refeicao" onclick="verDetalheRefeicao('dieta')">
-      🥗 Dieta — ${reservasHojePorTipo.dieta.length}
     </div>
     <div class="refeicao" onclick="verDetalheRefeicao('jantar')">
       🌙 Jantar — ${reservasHojePorTipo.jantar.length}
@@ -500,7 +500,7 @@ function verDetalheRefeicao(tipo) {
 
   if (lista.length === 0) {
     div.innerHTML = `
-      <h3>${tipo.toUpperCase()}</h3>
+      <h3>${formatarTipoRefeicao(tipo)}</h3>
       <i>Sem reservas</i>
       <br><button onclick="showCantinaReservasHoje()">⬅️ Voltar as Reservas de Hoje</button>
     `;
@@ -508,8 +508,13 @@ function verDetalheRefeicao(tipo) {
   }
 
   div.innerHTML = `
-    <h3>${tipo.toUpperCase()}</h3>
-    ${lista.map(r => `<div>👤 ${r.alunos.nome}</div>`).join("")}
+    <h3>${formatarTipoRefeicao(tipo)}</h3>
+    ${lista.map(r => `
+      <div>
+        👤 ${r.alunos.nome}
+        ${r.is_dieta ? "🥗 (Dieta)" : ""}
+      </div>
+    `).join("")}
     <br>
     <button onclick="showCantinaReservasHoje()">⬅️ Voltar as Reservas de Hoje</button>
   `;
@@ -683,7 +688,7 @@ function exibirHistoricoFiltrado() {
             🍽️ <span class="tipo-refeicao tipo-${r.tipo}">
               ${r.tipo.replace(/_/g, " ")}${r.is_dieta ? " 🥗" : ""}
             </span> — ${r.menus?.prato || "-"}<br>
-            💰 €${r.preco.toFixed(2)} | 📅 ${d}
+            💰 €${r.preco.toFixed(2)} | 📅 ${formatarData(d)}
           </div>
           <div class="${r.cancelada ? 'status-cancelada' : 'status-ativa'}">
             ${r.cancelada ? '❌ Cancelada' : '✅ Ativa'}
@@ -693,7 +698,7 @@ function exibirHistoricoFiltrado() {
 
       return `
         <div class="historico-card">
-          <div class="historico-data">📅 ${d}</div>
+          <div class="historico-data">📅 ${formatarData(d)}</div>
           ${items}
         </div>
       `;
@@ -1259,7 +1264,7 @@ async function exportarHistoricoAluno() {
     const status = r.cancelada ? "Cancelada" : "Ativa";
     
     linhas.push([
-      r.data,
+      formatarData(r.data),
       tipoFormatado,
       r.menus?.prato || "",
       r.preco.toFixed(2),

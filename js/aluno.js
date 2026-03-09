@@ -4,10 +4,10 @@
    ALUNO — MENU POR DATA E RESERVAS
 ============================== */
 function formatarData(dataISO) {
+  if (!dataISO) return "";
   const [ano, mes, dia] = dataISO.split("-");
   return `${dia}/${mes}/${ano}`;
 }
-
 async function showAlunoMenu() {
   show("alunoMenu");
   addBack("alunoMenu");
@@ -266,7 +266,7 @@ async function showAlunoReservas(){
         <div class="menu">
           ${emojiTipo(r.tipo, r.is_dieta)}
           <b>${r.tipo === "almoco" && r.is_dieta ? "Almoço (Dieta)" : r.tipo.replace("_"," ")}</b>
-          — ${r.data} ${r.menus?.prato ? "- " + r.menus.prato : ""}
+          — ${formatarData(r.data)} ${r.menus?.prato ? "- " + r.menus.prato : ""}
           (${formatCurrency(r.preco)})
           <br>
           ${r.cancelada ? "❌ Cancelada" : ""}
