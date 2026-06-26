@@ -6,6 +6,39 @@ function formatarData(dataISO) {
   return `${dia}/${mes}/${ano}`;
 }
 
+// Função para enviar email de notificação via Edge Function
+async function enviarEmailNotificacao(email, assunto, mensagem, nomeAluno) {
+  try {
+    const SUPABASE_URL = "https://fghsgknistganzbuxrjt.supabase.co";
+    const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnaHNna25pc3RnYW56YnV4cmp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNDUzNjcsImV4cCI6MjA4MzgyMTM2N30.6NPsu-DeQuEpjnHptdZTgsYmtx7mQ5STs8zbwYgIoYY";
+    
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification-email`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${ANON_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email,
+        subject: assunto,
+        message: mensagem,
+        studentName: nomeAluno
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('⚠️ Erro ao enviar email:', await response.text());
+      return false;
+    }
+
+    console.log('✅ Email enviado para:', email);
+    return true;
+  } catch (error) {
+    console.warn('⚠️ Exceção ao enviar email:', error);
+    return false;
+  }
+}
+
 /* ==============================
    CANTINA — NAVEGAÇÃO BASE
 ============================== */
@@ -207,11 +240,7 @@ function renderMenusFiltrados() {
   const container = document.getElementById("listaMenus");
   if (!container) return;
 
-  
-
-
   let menusFiltrados = window.todosOsMenus || [];
-
 
   if (!menusFiltrados.length) {
     container.innerHTML = `
@@ -222,127 +251,62 @@ function renderMenusFiltrados() {
     return;
   }
 
-  // Agrupar por data
-  const porDia = menusFiltrados.reduce((acc, m) => {
-    if (!acc[m.data]) acc[m.data] = [];
-    acc[m.data].push(m);
-    return acc;
-  }, {});
-
   const hoje = new Date();
   const hojeStr = hoje.toISOString().split("T")[0];
   const horaAtual = hoje.getHours();
 
-  const diasEditaveis = [];
-  const diasBloqueados = [];
+  // Renderizar lista simples sem agrupamento hierárquico
+  const menusHtml = menusFiltrados.map(m => {
+    const tipo = escapeHtml(m.tipo || "");
+    const prato = escapeHtml(m.prato || "");
+    const preco = Number(m.preco || 0).toFixed(2);
+    const data = m.data;
 
-  Object.entries(porDia)
-    .sort(([a], [b]) => b.localeCompare(a))
-    .forEach(([data, menusDia]) => {
-
-      const dataObj = new Date(data);
-      const diaSemana = dataObj.toLocaleDateString('pt-PT', { weekday: 'long' });
-      const dataFormatada = dataObj.toLocaleDateString('pt-PT', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric'
-      });
-
-      const ehHoje = data === hojeStr;
-      let diaTemEditaveis = false;
-
-      // Ordenar por tipo: pequeno_almoco → almoco → jantar
-        const ordemTipos = {
-          pequeno_almoco: 1,
-          almoco: 2,
-          jantar: 3
-        };
-
-        menusDia.sort((a, b) => {
-          return ordemTipos[a.tipo] - ordemTipos[b.tipo];
-        });
-
-      const menusHtml = menusDia.map(m => {
-
-        const tipo = escapeHtml(m.tipo || "");
-        const prato = escapeHtml(m.prato || "");
-        const preco = Number(m.preco || 0).toFixed(2);
-
-        const dataMenu = new Date(data);
-        let podeEditar = false;
-
-        if (dataMenu > new Date(hojeStr)) podeEditar = true;
-        if (data === hojeStr && horaAtual < 9) podeEditar = true;
-
-        if (podeEditar) diaTemEditaveis = true;
-
-        return `
-          <div class="menu-item">
-            <div>
-              <span style="font-size:22px;display:flex;align-items:center;">
-                ${tipoEmoji(tipo)}
-              </span>
-              <div>
-                <b>${formatarTipoRefeicao(tipo)}</b>
-                ${prato ? `<span class="prato"> — ${prato}</span>` : ""}
-                <span class="preco">€${preco}</span>
-              </div>
-            </div>
-
-            ${
-              podeEditar
-                ? `
-                <div class="menu-item-actions">
-                  <button class="btn-edit" onclick="startEdit('${m.id}')">
-                    ✏️ Editar
-                  </button>
-                  <button class="btn-delete" onclick="apagarMenu('${m.id}')">
-                    🗑️ Apagar
-                  </button>
-                </div>
-              `
-                : `<div class="menu-item-bloqueado">⛔ Bloqueado</div>`
-            }
-          </div>
-        `;
-      }).join("");
-
-      const diaHtml = `
-        <div class="menu-dia">
-          <h3 onclick="toggleDia('${data}')" class="menu-dia-titulo">
-            <span>📅 ${diaSemana.charAt(0).toUpperCase() + diaSemana.slice(1)}, ${dataFormatada}</span>
-            ${ehHoje ? `<span class="badge-hoje">Hoje</span>` : ""}
-            <span class="chevron-${data}" style="margin-left:auto;transition:transform 0.3s;display:inline-block;transform:rotate(180deg);">▼</span>
-          </h3>
-
-          <div id="dia-${data}" class=hidden>
-            ${menusHtml}
-          </div>
-        </div>
-      `;
-
-      if (diaTemEditaveis) {
-        diasEditaveis.push(diaHtml);
-      } else {
-        diasBloqueados.push(diaHtml);
-      }
+    const dataObj = new Date(data);
+    const dataFormatada = dataObj.toLocaleDateString('pt-PT', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
     });
 
-  container.innerHTML = `
-    ${diasEditaveis.length ? `
-      <div class="section">
-        <div class="section-title">✏️ Menus que ainda podes alterar</div>
-        ${diasEditaveis.join("")}
-      </div>
-    ` : ""}
+    const dataMenu = new Date(data);
+    let podeEditar = false;
 
-    ${diasBloqueados.length ? `
-      <div class="section">
-        <div class="section-title">⛔ Menus já bloqueados</div>
-        ${diasBloqueados.join("")}
+    if (dataMenu > new Date(hojeStr)) podeEditar = true;
+    if (data === hojeStr && horaAtual < 9) podeEditar = true;
+
+    return `
+      <div class="menu-item" style="margin-bottom:12px;padding:12px;background:#f9f9f9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
+        <div style="flex:1;">
+          <div style="font-size:14px;color:#666;margin-bottom:4px;">${dataFormatada}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:20px;">${tipoEmoji(tipo)}</span>
+            <div>
+              <b>${formatarTipoRefeicao(tipo)}</b>
+              ${prato ? `<span style="color:#666;"> — ${prato}</span>` : ""}
+            </div>
+            <span style="color:#007bff;font-weight:bold;margin-left:auto;">€${preco}</span>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:12px;">
+          ${
+            podeEditar
+              ? `
+              <button class="btn-edit" onclick="startEdit('${m.id}')" style="padding:6px 10px;font-size:12px;">
+                ✏️
+              </button>
+              <button class="btn-delete" onclick="apagarMenu('${m.id}')" style="padding:6px 10px;font-size:12px;">
+                🗑️
+              </button>
+            `
+              : `<span style="color:#999;font-size:12px;">Bloqueado</span>`
+          }
+        </div>
       </div>
-    ` : ""}
-  `;
+    `;
+  }).join("");
+
+  container.innerHTML = `<div style="margin-top:12px;">${menusHtml}</div>`;
 }
 /* =============================
    CANTINA — EDITAR / APAGAR MENU
@@ -373,6 +337,16 @@ async function saveEdit(id, novoPrato) {
   showLoading("⏳ Atualizando prato...");
 
   try {
+    // Buscar menu antigo para ter o prato anterior
+    const menuAntigo = window.todosOsMenus.find(m => m.id === id);
+    if (!menuAntigo) {
+      mostrarErro("Erro", "Menu não encontrado.");
+      return;
+    }
+
+    const pratosAntigo = menuAntigo.prato;
+
+    // Atualizar menu
     const { error } = await supabaseClient
       .from("menus")
       .update({ prato: novoPrato })
@@ -383,7 +357,71 @@ async function saveEdit(id, novoPrato) {
       return;
     }
 
-    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!");
+    // Notificar alunos que têm reserva neste menu
+    try {
+      console.log("🔔 Iniciando envio de notificações...");
+      console.log("📋 Dados da notificação:", {
+        menu_id: id,
+        prato_antigo: pratosAntigo,
+        prato_novo: novoPrato,
+        data_menu: menuAntigo.data,
+        tipo_menu: menuAntigo.tipo
+      });
+
+      const { data: notificacoes, error: erroNotif } = await supabaseClient
+        .rpc('notificar_menu_alterado', {
+          p_menu_id: id,
+          p_prato_antigo: pratosAntigo,
+          p_prato_novo: novoPrato,
+          p_data_menu: menuAntigo.data,
+          p_tipo_menu: menuAntigo.tipo
+        });
+
+      console.log("📊 Resposta da RPC:", { notificacoes, erroNotif });
+
+      if (erroNotif) {
+        console.error("❌ Erro na função RPC:", erroNotif);
+      } else if (notificacoes > 0) {
+        console.log(`✅ Notificações enviadas para ${notificacoes} aluno(s)`);
+
+        // Enviar emails para os alunos
+        const { data: alunosComReserva, error: erroAlunos } = await supabaseClient
+          .from('reservas')
+          .select('alunos(email, nome)')
+          .eq('menu_id', id)
+          .is('cancelamento_tipo', null);
+
+        if (!erroAlunos && alunosComReserva) {
+          const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+          const dataObj = new Date(menuAntigo.data);
+          const dia = dataObj.getDate();
+          const mes = nomesMeses[dataObj.getMonth()];
+          const tipoNome = menuAntigo.tipo === 'almoco' ? 'Almoço' : 
+                          menuAntigo.tipo === 'pequeno_almoco' ? 'Pequeno-almoço' : 
+                          menuAntigo.tipo === 'jantar' ? 'Jantar' : menuAntigo.tipo;
+
+          const assunto = `Menu Alterado - ${tipoNome}, ${dia} de ${mes}`;
+          const mensagem = `A cantina alterou o menu que reservaste para <strong>${dia} de ${mes}</strong>.<br><br><strong>Prato anterior:</strong> ${pratosAntigo}<br><strong>Prato novo:</strong> ${novoPrato}`;
+
+          // Enviar emails (paralelo)
+          const emailsEnviados = await Promise.allSettled(
+            alunosComReserva.map(r => 
+              enviarEmailNotificacao(r.alunos.email, assunto, mensagem, r.alunos.nome)
+            )
+          );
+
+          const sucesso = emailsEnviados.filter(e => e.status === 'fulfilled' && e.value === true).length;
+          console.log(`📧 Emails enviados: ${sucesso}/${alunosComReserva.length}`);
+        }
+      } else {
+        console.log("⚠️ Nenhuma notificação enviada (provavelmente não há reservas ativas neste menu)");
+      }
+    } catch (erroNotif) {
+      console.error("❌ Exceção ao notificar alunos:", erroNotif);
+      // Não bloqueia a operação se notificações falhar
+    }
+
+    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!\n✅ Alunos foram notificados da alteração.");
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao atualizar prato");
@@ -443,7 +481,7 @@ async function showCantinaReservasHoje() {
       alunos ( nome )
     `)
     .eq("data", hoje)
-    .eq("cancelada", false);
+    .is("cancelamento_tipo", null);
 
   if (error) {
     div.innerHTML = `<i>${error.message}</i>`;
@@ -498,7 +536,7 @@ async function alunoTemDivida(alunoId) {
       .from("reservas")
       .select("id")
       .eq("aluno_id", alunoId)
-      .eq("cancelada", false)
+      .is("cancelamento_tipo", null)
       .limit(1);
 
     if (error) {
@@ -737,7 +775,7 @@ async function showCantinaSaldos() {
     const { data, error } = await supabaseClient
       .from("reservas")
       .select("aluno_id, preco, alunos(nome)")
-      .eq("cancelada", false);
+      .is("cancelamento_tipo", null);
 
     if (error) {
       handleError(error, "Erro ao carregar Valores em Dívida");
@@ -1046,7 +1084,7 @@ async function carregarSaldoAlunoFallback(alunoId) {
       .from("reservas")
       .select("data, preco, alunos(nome)")
       .eq("aluno_id", alunoId)
-      .eq("cancelada", false);
+      .is("cancelamento_tipo", null);
 
     if (error) {
       handleError(error, "Erro ao carregar histórico do aluno");
@@ -1327,7 +1365,7 @@ async function gerarRelatorioMensal() {
     const { data, error } = await supabaseClient
       .from("reservas")
       .select("aluno_id, preco, alunos(nome), data")
-      .eq("cancelada", false);
+      .is("cancelamento_tipo", null);
 
     if (error) {
       mostrarErro("Erro", "Erro ao gerar relatório");
@@ -1395,7 +1433,7 @@ async function exportarSaldosExcel() {
   const { data, error } = await supabaseClient
     .from("reservas")
     .select("aluno_id, preco, alunos(nome)")
-    .eq("cancelada", false);
+    .is("cancelamento_tipo", null);
 
   if (error) {
     mostrarErro("Erro", "Erro ao buscar valores em dívida: " + error.message);

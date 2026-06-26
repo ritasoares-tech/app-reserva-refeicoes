@@ -491,10 +491,15 @@ async function menu(){
     elements.alunoMenuSelect.classList.remove("hidden");
     elements.alunoMenuTitle.innerText = "Área do Aluno";
     elements.alunoButtons.innerHTML = `
-      <button class="btn-full" onclick="showAlunoMenu()">Reservar Menu</button>
       <button class="btn-full" onclick="showAlunoReservas()">Minhas Reservas</button>
+      <button class="btn-full" onclick="showAlunoMenu()">Reservar Refeição</button>
+      <button class="btn-full" style="position:relative;" onclick="showNotificacoes()">
+        🔔 Notificações
+        <span id="notificacoesBadge" class="hidden" style="position:absolute;top:4px;right:8px;background:#ff5722;color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:bold;">0</span>
+      </button>
     `;
     await saldo();
+    await carregarNotificacoes(); // Carregar notificações ao abrir o menu
   } else {
     // Menu da Cantina
     elements.cantinaMenuSelect.classList.remove("hidden");
@@ -522,7 +527,7 @@ async function saldo(){
       .from("reservas")
       .select("preco, data")
       .eq("aluno_id", aluno.id)
-      .eq("cancelada", false);
+      .is("cancelamento_tipo", null);
 
     if(error){
       handleError(error, "Erro ao buscar reservas");
