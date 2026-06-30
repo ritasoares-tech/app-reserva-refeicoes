@@ -76,7 +76,7 @@ async function showAlunoMenu() {
           let podeReservar = true;
           let mensagemHorario = "";
           
-          if (data === hojeNow) {
+          if (data === hojeAtualizado) {
             if (m.tipo === "almoco" && hora >= 9) {
               podeReservar = false;
               mensagemHorario = " ⏰ (Prazo ultrapassado - até às 9:00)";
