@@ -535,7 +535,7 @@ async function saldo(){
       .from("reservas")
       .select("preco, data")
       .eq("aluno_id", aluno.id)
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if(error){
       handleError(error, "Erro ao buscar reservas");

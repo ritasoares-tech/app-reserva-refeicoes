@@ -349,43 +349,9 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
         return;
       }
 
-      // 🍽️ O almoço é reservado automaticamente para todos os alunos assim que criado
-      if (tipo === "almoco" && data && data.length) {
-        const menuCriado = data[0];
-        const { data: alunos, error: erroAlunos } = await supabaseClient
-          .from("alunos")
-          .select("id");
-
-        if (!erroAlunos && alunos && alunos.length) {
-          // Evitar duplicados: verificar que alunos já têm reserva de almoço neste dia
-          const { data: jaReservados } = await supabaseClient
-            .from("reservas")
-            .select("aluno_id")
-            .eq("data", dataValue)
-            .eq("tipo", "almoco");
-
-          const idsComReserva = new Set((jaReservados || []).map(r => r.aluno_id));
-
-          const reservasAuto = alunos
-            .filter(a => !idsComReserva.has(a.id))
-            .map(a => ({
-              aluno_id: a.id,
-              menu_id: menuCriado.id,
-              data: dataValue,
-              preco: menuCriado.preco,
-              tipo: "almoco",
-              is_dieta: false,
-              cancelamento_tipo: null
-            }));
-
-          if (reservasAuto.length) {
-            const { error: erroReservas } = await supabaseClient
-              .from("reservas")
-              .insert(reservasAuto);
-            if (erroReservas) console.error("⚠️ Erro ao reservar almoço automaticamente", erroReservas);
-          }
-        }
-      }
+      // O almoço é reservado automaticamente para todos os alunos pelo trigger
+      // criar_reservas_automaticas_almoco, na base de dados (ver migração 001).
+      // Não duplicar aqui: o trigger corre sempre, mesmo se o menu for criado por outra via.
 
       mostrarSucesso("Menu Criado", "Menu criado com sucesso!");
       console.log("✅ Menu criado com sucesso", data);
@@ -752,36 +718,6 @@ async function saveEdit(id, novoPrato) {
         console.error("❌ Erro na função RPC:", erroNotif);
       } else if (notificacoes > 0) {
         console.log(`✅ Notificações enviadas para ${notificacoes} aluno(s)`);
-
-        // Enviar emails para os alunos
-        const { data: alunosComReserva, error: erroAlunos } = await supabaseClient
-          .from('reservas')
-          .select('alunos(email, nome)')
-          .eq('menu_id', id)
-          .is('cancelamento_tipo', null);
-
-        if (!erroAlunos && alunosComReserva) {
-          const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-          const dataObj = new Date(menuAntigo.data);
-          const dia = dataObj.getDate();
-          const mes = nomesMeses[dataObj.getMonth()];
-          const tipoNome = menuAntigo.tipo === 'almoco' ? 'Almoço' : 
-                          menuAntigo.tipo === 'pequeno_almoco' ? 'Pequeno Almoço' : 
-                          menuAntigo.tipo === 'jantar' ? 'Jantar' : menuAntigo.tipo;
-
-          const assunto = `Menu Alterado - ${tipoNome}, ${dia} de ${mes}`;
-          const mensagem = `A cantina alterou o menu que reservaste para <strong>${dia} de ${mes}</strong>.<br><br><strong>Prato anterior:</strong> ${pratosAntigo}<br><strong>Prato novo:</strong> ${novoPrato}`;
-
-          // Enviar emails (paralelo)
-          const emailsEnviados = await Promise.allSettled(
-            alunosComReserva.map(r => 
-              enviarEmailNotificacao(r.alunos.email, assunto, mensagem, r.alunos.nome)
-            )
-          );
-
-          const sucesso = emailsEnviados.filter(e => e.status === 'fulfilled' && e.value === true).length;
-          console.log(`📧 Emails enviados: ${sucesso}/${alunosComReserva.length}`);
-        }
       } else {
         console.log("⚠️ Nenhuma notificação enviada (provavelmente não há reservas ativas neste menu)");
       }
@@ -790,7 +726,7 @@ async function saveEdit(id, novoPrato) {
       // Não bloqueia a operação se notificações falhar
     }
 
-    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!\n✅ Alunos foram notificados da alteração.");
+    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!\n✅ Os alunos com reserva veem o aviso na app.");
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao atualizar prato");
@@ -850,7 +786,7 @@ async function showCantinaReservasHoje() {
       alunos ( nome )
     `)
     .eq("data", hoje)
-    .is("cancelamento_tipo", null);
+    .eq("ativa", true);
 
   if (error) {
     div.innerHTML = `<i>${error.message}</i>`;
@@ -914,7 +850,7 @@ async function alunoTemDivida(alunoId) {
       .from("reservas")
       .select("id")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null)
+      .eq("ativa", true)
       .lt("data", inicioMesAtual)
       .limit(1);
 
@@ -1097,7 +1033,8 @@ async function showHistoricoAluno(alunoId, alunoNome) {
       id,
       tipo,
       data,
-      cancelada,
+      ativa,
+      cancelamento_tipo,
       preco,
       is_dieta,
       menus!inner(prato)
@@ -1139,6 +1076,18 @@ function selecionarDiaHistorico(iso){
   exibirHistoricoFiltrado();
 }
 
+// Estado legível de uma reserva, derivado de cancelamento_tipo (fonte de verdade única).
+// Espelha as etiquetas usadas em aluno.js › _cartaoReserva.
+// `ativa` é calculada pela base de dados: NULL e 'reactivated' são ativas.
+function _estadoReserva(r){
+  switch(r.cancelamento_tipo){
+    case "user":        return { texto: "❌ Cancelada pelo aluno", classe: "status-cancelada" };
+    case "payment":     return { texto: "💳 Paga",                 classe: "status-cancelada" };
+    case "reactivated": return { texto: "🔄 Reativada",            classe: "status-ativa" };
+    default:            return { texto: "✅ Ativa",                classe: "status-ativa" };
+  }
+}
+
 function _cartoesHistoricoDia(iso){
   const doDia = (historicoAtual || []).filter(r => r.data === iso);
   if(!doDia.length) return `<i>Sem reservas neste dia.</i>`;
@@ -1151,8 +1100,8 @@ function _cartoesHistoricoDia(iso){
         <span style="color:#007bff;font-weight:bold;">${Number(r.preco).toFixed(2)}€</span>
       </div>
       <div style="font-size:13px;color:#555;margin-bottom:6px;">${escapeHtml(r.menus?.prato || "-")}</div>
-      <div class="${r.cancelada ? 'status-cancelada' : 'status-ativa'}" style="font-size:12px;">
-        ${r.cancelada ? '❌ Cancelada' : '✅ Ativa'}
+      <div class="${_estadoReserva(r).classe}" style="font-size:12px;">
+        ${_estadoReserva(r).texto}
       </div>
     </div>
   `).join("");
@@ -1266,7 +1215,7 @@ async function showCantinaSaldos() {
     const { data, error } = await supabaseClient
       .from("reservas")
       .select("aluno_id, preco, alunos(nome)")
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if (error) {
       handleError(error, "Erro ao carregar Valores em Dívida");
@@ -1370,80 +1319,15 @@ async function showSaldoAluno(alunoId) {
   showLoading("⏳ Carregando dados...");
 
   try {
-    // Primeiro, verificar diretamente as reservas do aluno para debug
-    console.log('🔍 DEBUG: Verificando reservas do aluno ID:', alunoId);
-    const { data: todasReservas, error: erroReservas } = await supabaseClient
-      .from("reservas")
-      .select("data, preco, cancelada, tipo, id")
-      .eq("aluno_id", alunoId)
-      .order("data", { ascending: false });
-
-    console.log('🔍 DEBUG: Todas as reservas do aluno:', todasReservas);
-    console.log('🔍 DEBUG: Erro reservas:', erroReservas);
-    console.log('🔍 DEBUG: Total de reservas encontradas:', todasReservas?.length || 0);
-
-    // Verificar reservas não canceladas
-    const reservasNaoCanceladas = todasReservas?.filter(r => !r.cancelada) || [];
-    console.log('🔍 DEBUG: Reservas não canceladas:', reservasNaoCanceladas);
-    console.log('🔍 DEBUG: Total de reservas não canceladas:', reservasNaoCanceladas.length);
-
-    // Calcular total manualmente para verificação
-    const totalManual = reservasNaoCanceladas.reduce((sum, r) => sum + Number(r.preco), 0);
-    console.log('🔍 DEBUG: Total manual calculado:', totalManual);
-
-    // Se não há reservas não canceladas, mostrar detalhes
-    if (reservasNaoCanceladas.length === 0 && todasReservas && todasReservas.length > 0) {
-      console.log('🔍 DEBUG: Todas as reservas estão canceladas!');
-      console.log('🔍 DEBUG: Detalhes das reservas canceladas:', 
-        todasReservas.map(r => ({ data: r.data, preco: r.preco, cancelada: r.cancelada })));
-    }
-
-    // Usar função original que funciona com as reservas
-    console.log('🔍 Buscando dívida por mês com RPC...');
     const { data: dividas, error } = await supabaseClient
       .rpc('obter_divida_por_mes', { p_aluno_id: alunoId });
 
-    console.log('🔍 DEBUG: Erro RPC:', error);
-    console.log('🔍 DEBUG: Resultado RPC:', dividas);
-
     if (error) {
-      console.error("Erro ao buscar dívida por mês:", error);
       handleError(error, "Erro ao carregar dívidas do aluno");
       return;
     }
 
-    console.log('🔍 Dívidas encontradas pela RPC:', dividas);
-
     if (!dividas || dividas.length === 0) {
-      console.log('📋 Nenhuma dívida encontrada pela função RPC');
-      
-      // Se há reservas não canceladas mas RPC não retorna, há problema na função
-      if (reservasNaoCanceladas.length > 0) {
-        console.log('⚠️ ALERTA: Há reservas não canceladas mas a RPC não retornou dívidas!');
-        console.log('⚠️ Verificando se a função RPC está correta...');
-        
-        // Tentar calcular dívida manualmente e mostrar
-        const porMes = {};
-        reservasNaoCanceladas.forEach(r => {
-          const data = new Date(r.data);
-          const chave = `${data.getFullYear()}-${data.getMonth() + 1}`;
-          if (!porMes[chave]) {
-            porMes[chave] = { ano: data.getFullYear(), mes: data.getMonth() + 1, valor: 0 };
-          }
-          porMes[chave].valor += Number(r.preco);
-        });
-        
-        console.log('🔍 DEBUG: Dívida calculada manualmente por mês:', porMes);
-        
-        // Mostrar dívida manualmente calculada
-        const dividasManuais = Object.values(porMes);
-        if (dividasManuais.length > 0) {
-          console.log('🔄 Usando dívida calculada manualmente...');
-          await mostrarDividaManual(alunoId, dividasManuais);
-          return;
-        }
-      }
-      
       document.getElementById("tituloAluno").innerText = "Sem dívidas";
       document.getElementById("valorTotal").innerText = "€0.00";
       document.getElementById("mesesDivida").innerHTML = "";
@@ -1460,55 +1344,6 @@ async function showSaldoAluno(alunoId) {
   } finally {
     hideLoading();
   }
-}
-
-// Função auxiliar para mostrar dívida calculada manualmente
-async function mostrarDividaManual(alunoId, dividas) {
-  // Obter nome do aluno
-  const { data: aluno } = await supabaseClient
-    .from("alunos")
-    .select("nome")
-    .eq("id", alunoId)
-    .single();
-
-  if (aluno && aluno.nome) {
-    document.getElementById("tituloAluno").innerText = aluno.nome;
-  } else {
-    document.getElementById("tituloAluno").innerText = "Aluno";
-  }
-
-  // Calcular total
-  const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
-  document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
-
-  // Exibir meses em dívida
-  const mesesDivida = document.getElementById("mesesDivida");
-  mesesDivida.innerHTML = "";
-
-  const nomesMeses = [
-    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
-  ];
-
-  dividas.forEach(item => {
-    const nomeMes = nomesMeses[item.mes - 1];
-    const emAtraso = new Date() > new Date(item.ano, item.mes, 15);
-
-    mesesDivida.innerHTML += `
-      <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
-        <span>${nomeMes} ${item.ano}</span>
-        <strong>${Number(item.valor).toFixed(2)}€</strong>
-        <button class="${emAtraso ? 'btn-atraso' : ''}" onclick="liquidarMes('${alunoId}', ${item.ano}, ${item.mes})">
-          ${emAtraso ? '⚠️ Liquidar' : 'Liquidar mês'}
-        </button>
-      </div>
-    `;
-  });
-
-  // Mostrar botão de liquidar total
-  const btnLiquidar = document.getElementById("btnLiquidarTotal");
-  btnLiquidar.classList.remove("hidden");
-  btnLiquidar.style.display = "block";
 }
 
 // Função auxiliar para processar dívidas encontradas
@@ -1575,7 +1410,7 @@ async function carregarSaldoAlunoFallback(alunoId) {
       .from("reservas")
       .select("data, preco, alunos(nome)")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if (error) {
       handleError(error, "Erro ao carregar histórico do aluno");
@@ -1671,7 +1506,7 @@ async function liquidarDividaTotal(alunoId) {
       .from("reservas")
       .select("data")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if (erroReservas) {
       console.error("❌ Erro ao buscar reservas:", erroReservas);
@@ -1862,7 +1697,7 @@ async function gerarRelatorioMensal() {
     const { data, error } = await supabaseClient
       .from("reservas")
       .select("aluno_id, preco, alunos(nome), data")
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if (error) {
       mostrarErro("Erro", "Erro ao gerar relatório");
@@ -1930,7 +1765,7 @@ async function exportarSaldosExcel() {
   const { data, error } = await supabaseClient
     .from("reservas")
     .select("aluno_id, preco, alunos(nome)")
-    .is("cancelamento_tipo", null);
+    .eq("ativa", true);
 
   if (error) {
     mostrarErro("Erro", "Erro ao buscar valores em dívida: " + error.message);
@@ -2007,7 +1842,7 @@ async function exportarHistoricoAluno() {
 
   const { data: reservas, error } = await supabaseClient
     .from("reservas")
-    .select("data, tipo, preco, cancelada, is_dieta, menus(prato)")
+    .select("data, tipo, preco, ativa, cancelamento_tipo, is_dieta, menus(prato)")
     .eq("aluno_id", alunoAtual)
     .order("data", { ascending: false });
 
@@ -2033,7 +1868,7 @@ async function exportarHistoricoAluno() {
   reservas.forEach(r => {
     const tipoFormatado = r.tipo.replace("_", " ").toUpperCase();
     const dieta = r.is_dieta ? "Sim" : "Não";
-    const status = r.cancelada ? "Cancelada" : "Ativa";
+    const status = _estadoReserva(r).texto;
     
     linhas.push([
       formatarData(r.data),
@@ -2044,7 +1879,7 @@ async function exportarHistoricoAluno() {
       status
     ]);
 
-    if (!r.cancelada) {
+    if (r.ativa) {
       totalAtivo += r.preco;
     }
   });
