@@ -1877,3 +1877,62 @@ async function exportarHistoricoAluno() {
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
 
+
+/* =============================
+   CANTINA — PEDIDOS DE CANCELAMENTO (Cluster 6, passo 4)
+============================== */
+
+let _pedidosPendentes = [];
+
+async function showPedidosCancelamento(){
+  show("cantinaPedidos");
+
+  const div = document.getElementById("listaPedidos");
+  div.innerHTML = "⏳ A carregar pedidos...";
+
+  // listar_solicitacoes_pendentes NÃO é SECURITY DEFINER de própria vontade: as
+  // duas políticas de SELECT da 005 fazem o âmbito sozinhas. A cantina vê tudo.
+  const { data, error } = await supabaseClient.rpc("listar_solicitacoes_pendentes");
+
+  if(error){
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
+    return;
+  }
+
+  _pedidosPendentes = data || [];
+
+  if(!_pedidosPendentes.length){
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem pedidos pendentes.</div>";
+    return;
+  }
+
+  div.innerHTML = _pedidosPendentes.map(_cartaoPedido).join("");
+}
+
+// TUDO o que o aluno escreveu passa por escapeHtml. Isto é renderizado na sessão
+// da cantina, que é a conta que aprova cancelamentos e liquida dívidas.
+function _cartaoPedido(p){
+  return `
+    <div style="border:1px solid #e0e0e0; border-radius:10px; padding:12px; margin-bottom:10px; text-align:left;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <b>👤 ${escapeHtml(p.aluno_nome)}</b>
+        <span style="color:#666; font-size:13px;">${formatarTipoRefeicao(p.tipo_refeicao)} · ${p.data_reserva}</span>
+      </div>
+      <div style="font-size:13px; color:#555; margin-bottom:6px;">${escapeHtml(p.motivo || "-")}</div>
+      ${p.troca_por_lanche ? `
+        <div style="font-size:13px; color:#555; margin-bottom:6px;">
+          🥪 Pede troca por lanche: ${escapeHtml(p.lanche_substituto || "não especificado")}
+        </div>
+      ` : ""}
+      <div style="font-size:12px; color:#888; margin-bottom:8px;">
+        Cancelamentos aprovados nos últimos 30 dias: ${p.cancelamentos_30_dias}
+      </div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'cancelar')" style="flex:1; padding:8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancelar</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'dieta')" style="flex:1; padding:8px; background:#ffc107; color:#333; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Dieta</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'outros')" style="flex:1; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Outros</button>
+        <button onclick="rejeitarPedido('${p.solicitacao_id}')" style="flex:1; padding:8px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Rejeitar</button>
+      </div>
+    </div>
+  `;
+}
