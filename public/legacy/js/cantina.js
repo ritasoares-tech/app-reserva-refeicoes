@@ -6,39 +6,6 @@ function formatarData(dataISO) {
   return `${dia}/${mes}/${ano}`;
 }
 
-// Função para enviar email de notificação via Edge Function
-async function enviarEmailNotificacao(email, assunto, mensagem, nomeAluno) {
-  try {
-    const SUPABASE_URL = "https://fghsgknistganzbuxrjt.supabase.co";
-    const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnaHNna25pc3RnYW56YnV4cmp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNDUzNjcsImV4cCI6MjA4MzgyMTM2N30.6NPsu-DeQuEpjnHptdZTgsYmtx7mQ5STs8zbwYgIoYY";
-    
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification-email`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        subject: assunto,
-        message: mensagem,
-        studentName: nomeAluno
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('⚠️ Erro ao enviar email:', await response.text());
-      return false;
-    }
-
-    console.log('✅ Email enviado para:', email);
-    return true;
-  } catch (error) {
-    console.warn('⚠️ Exceção ao enviar email:', error);
-    return false;
-  }
-}
-
 /* ==============================
    CANTINA — NAVEGAÇÃO BASE
 ============================== */
