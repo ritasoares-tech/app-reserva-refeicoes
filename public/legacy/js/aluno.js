@@ -641,6 +641,9 @@ function _cartaoReserva(r, ctx){
         </button>
       ` : ""}
       ${mostrarAvisoLimite ? `
+        <button onclick="pedirCancelamentoEspecial('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
+          📩 Pedir cancelamento especial
+        </button>
         <div style="margin-top:8px; padding:8px; background-color:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
           ⚠️ Para conseguires cancelar liga à cantina - 914117705
         </div>
