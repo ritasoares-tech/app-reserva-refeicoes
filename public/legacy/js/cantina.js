@@ -1936,3 +1936,65 @@ function _cartaoPedido(p){
     </div>
   `;
 }
+
+const _ROTULO_DECISAO = {
+  cancelar: "cancelar a reserva",
+  dieta:    "passar a reserva a dieta",
+  outros:   "registar a troca por outros alimentos e manter a reserva"
+};
+
+async function decidirPedido(solicitacaoId, decisao){
+  if(!await confirmar("Aprovar Pedido", `Confirmas ${_ROTULO_DECISAO[decisao]}?`)) return;
+
+  showLoading("⏳ A aprovar...");
+  try {
+    const { error } = await supabaseClient.rpc("aprovar_cancelamento_especial", {
+      p_solicitacao_id: solicitacaoId,
+      p_decisao: decisao,
+      p_observacoes: null
+    });
+    hideLoading();
+
+    if(error){
+      // "Pedido inexistente ou já processado" quer normalmente dizer que outra
+      // pessoa da cantina já decidiu isto, ou um duplo-clique. Mostrar e
+      // recarregar, para a linha desaparecer.
+      await mostrarErro("Erro ao Aprovar", error.message || "Erro inesperado");
+      showPedidosCancelamento();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Aprovado", "O pedido foi decidido.");
+    showPedidosCancelamento();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao aprovar");
+  } finally {
+    hideLoading();
+  }
+}
+
+async function rejeitarPedido(solicitacaoId){
+  if(!await confirmar("Rejeitar Pedido", "Confirmas que rejeitas este pedido? A refeição mantém-se.")) return;
+
+  showLoading("⏳ A rejeitar...");
+  try {
+    const { error } = await supabaseClient.rpc("rejeitar_cancelamento_especial", {
+      p_solicitacao_id: solicitacaoId,
+      p_observacoes: null
+    });
+    hideLoading();
+
+    if(error){
+      await mostrarErro("Erro ao Rejeitar", error.message || "Erro inesperado");
+      showPedidosCancelamento();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Rejeitado", "O pedido foi rejeitado.");
+    showPedidosCancelamento();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao rejeitar");
+  } finally {
+    hideLoading();
+  }
+}
