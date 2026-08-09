@@ -1,23 +1,16 @@
 // Funções da área da cantina (menus, reservas, histórico, saldos, relatórios)
 
-function formatarData(dataISO) {
-  if (!dataISO) return "";
-  const [ano, mes, dia] = dataISO.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
+/* formatarData e escapeHtml vivem agora no app.js. */
+
+// Eram globais implícitas: nasciam da atribuição dentro de showCantinaReservasHoje,
+// sem declaração nenhuma.
+let reservasHoje = [];
+let reservasHojePorTipo = {};
 
 /* ==============================
    CANTINA — NAVEGAÇÃO BASE
 ============================== */
 
-function showCantinaDashboard() {
-  esconderTodasPaginas();
-
-  const pagina = document.getElementById("cantinaDashboard");
-  if (pagina) {
-    pagina.classList.remove("hidden");
-  }
-}
 
 /* =============================
    CANTINA — CRIAR MENU
@@ -45,7 +38,6 @@ function _badgeMenuCantina(tipo){
 }
 
 async function showCriarMenu() {
-  console.log("📝 Mostrando calendário de criar menu");
   show("cantinaMenu");
 
   if(!_mesCriarView) _mesCriarView = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -235,7 +227,6 @@ async function criarRefeicao(iso, tipo){
 }
 
 async function addMenuDireto(dataValue, tipo, pratoEntrada) {
-  console.log("📝 Adicionando menu...", { supabaseClient: !!supabaseClient });
 
   if (!supabaseClient) {
     mostrarMensagem("error", "❌ Erro: Conexão não pronta. Atualiza a página.");
@@ -244,7 +235,6 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
   }
 
   let prato = (pratoEntrada || "").trim();
-  console.log("📋 Valores do formulário:", { dataValue, tipo, prato });
 
   if (!dataValue) {
     mostrarMensagem("warning", "⚠️ Seleciona uma data");
@@ -299,7 +289,6 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
     }
 
     try {
-      console.log("🌐 Enviando para Supabase...", { dataValue, tipo, prato, preco: configuracao[tipo].preco });
       
       const { data, error } = await supabaseClient
         .from("menus")
@@ -321,7 +310,6 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
       // Não duplicar aqui: o trigger corre sempre, mesmo se o menu for criado por outra via.
 
       mostrarSucesso("Menu Criado", "Menu criado com sucesso!");
-      console.log("✅ Menu criado com sucesso", data);
   } catch (err) {
     handleError(err, "Erro ao criar menu");
   } finally {
@@ -349,21 +337,10 @@ function toggleDia(data) {
 }
 
 // 🔐 Proteção simples contra HTML injection
-function escapeHtml(text) {
-  if (!text) return "";
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 let _mesMenusView = null;
 let _diaMenusSelecionado = null;
 
 async function showMenusCriados() {
-  console.log("📋 Carregando menus criados...");
   show("cantinaMenus");
   showLoading("⏳ Carregando menus...");
 
@@ -538,78 +515,6 @@ function formatarTipoRefeicao(tipo) {
   return nomes[tipo] || tipo;
 }
 
-function renderMenusFiltrados() {
-  const container = document.getElementById("listaMenus");
-  if (!container) return;
-
-  let menusFiltrados = window.todosOsMenus || [];
-
-  if (!menusFiltrados.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-state-icon">🔍</span>
-        <p>Nenhum menu encontrado para a data selecionada</p>
-      </div>`;
-    return;
-  }
-
-  const hoje = new Date();
-  const hojeStr = hoje.toISOString().split("T")[0];
-  const horaAtual = hoje.getHours();
-
-  // Renderizar lista simples sem agrupamento hierárquico
-  const menusHtml = menusFiltrados.map(m => {
-    const tipo = escapeHtml(m.tipo || "");
-    const prato = escapeHtml(m.prato || "");
-    const preco = Number(m.preco || 0).toFixed(2);
-    const data = m.data;
-
-    const dataObj = new Date(data);
-    const dataFormatada = dataObj.toLocaleDateString('pt-PT', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-
-    const dataMenu = new Date(data);
-    let podeEditar = false;
-
-    if (dataMenu > new Date(hojeStr)) podeEditar = true;
-    if (data === hojeStr && horaAtual < 9) podeEditar = true;
-
-    return `
-      <div class="menu-item" style="margin-bottom:12px;padding:12px;background:#f9f9f9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
-        <div style="flex:1;">
-          <div style="font-size:14px;color:#666;margin-bottom:4px;">${dataFormatada}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:20px;">${tipoEmoji(tipo)}</span>
-            <div>
-              <b>${formatarTipoRefeicao(tipo)}</b>
-              ${prato ? `<span style="color:#666;"> — ${prato}</span>` : ""}
-            </div>
-            <span style="color:#007bff;font-weight:bold;margin-left:auto;">${preco}€</span>
-          </div>
-        </div>
-        <div style="display:flex;gap:6px;margin-left:12px;">
-          ${
-            podeEditar
-              ? `
-              <button class="btn-edit" onclick="startEdit('${m.id}')" style="padding:6px 10px;font-size:12px;">
-                ✏️
-              </button>
-              <button class="btn-delete" onclick="apagarMenu('${m.id}')" style="padding:6px 10px;font-size:12px;">
-                🗑️
-              </button>
-            `
-              : `<span style="color:#999;font-size:12px;">Bloqueado</span>`
-          }
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  container.innerHTML = `<div style="margin-top:12px;">${menusHtml}</div>`;
-}
 /* =============================
    CANTINA — EDITAR / APAGAR MENU
 ============================= */
@@ -661,14 +566,6 @@ async function saveEdit(id, novoPrato) {
 
     // Notificar alunos que têm reserva neste menu
     try {
-      console.log("🔔 Iniciando envio de notificações...");
-      console.log("📋 Dados da notificação:", {
-        menu_id: id,
-        prato_antigo: pratosAntigo,
-        prato_novo: novoPrato,
-        data_menu: menuAntigo.data,
-        tipo_menu: menuAntigo.tipo
-      });
 
       const { data: notificacoes, error: erroNotif } = await supabaseClient
         .rpc('notificar_menu_alterado', {
@@ -679,14 +576,11 @@ async function saveEdit(id, novoPrato) {
           p_tipo_menu: menuAntigo.tipo
         });
 
-      console.log("📊 Resposta da RPC:", { notificacoes, erroNotif });
 
       if (erroNotif) {
         console.error("❌ Erro na função RPC:", erroNotif);
       } else if (notificacoes > 0) {
-        console.log(`✅ Notificações enviadas para ${notificacoes} aluno(s)`);
       } else {
-        console.log("⚠️ Nenhuma notificação enviada (provavelmente não há reservas ativas neste menu)");
       }
     } catch (erroNotif) {
       console.error("❌ Exceção ao notificar alunos:", erroNotif);
@@ -703,10 +597,8 @@ async function saveEdit(id, novoPrato) {
 }
 
 async function apagarMenu(id) {
-  console.log("🗑️ Apagando menu:", id);
 
   if (!await confirmar("Apagar Menu", "Tens a certeza que queres apagar este menu?")) {
-    console.log("❌ Operação cancelada pelo utilizador");
     return;
   }
 
@@ -724,7 +616,6 @@ async function apagarMenu(id) {
     }
 
     mostrarSucesso("Sucesso", "Menu apagado com sucesso!");
-    console.log("✅ Menu apagado:", id);
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao apagar menu");
@@ -1260,7 +1151,6 @@ function renderizarSaldos() {
     .join("");
   
   div.innerHTML = html;
-  console.log(`📊 A mostrar ${saldosFiltrados.length} de ${todosSaldos.length} saldos`);
 }
 
 function filtrarSaldos() {
@@ -1332,25 +1222,20 @@ async function showSaldoAluno(alunoId) {
 // Função auxiliar para processar dívidas encontradas
 async function processarDividasEncontradas(alunoId, dividas) {
   // Obter nome do aluno
-  console.log('🔍 Buscando nome do aluno...');
   const { data: aluno } = await supabaseClient
     .from("alunos")
     .select("nome")
     .eq("id", alunoId)
     .single();
 
-  console.log('👤 Aluno encontrado:', aluno);
   if (aluno && aluno.nome) {
     document.getElementById("tituloAluno").innerText = aluno.nome;
-    console.log('✅ Nome do aluno definido no título:', aluno.nome);
   } else {
     document.getElementById("tituloAluno").innerText = "Aluno";
-    console.log('⚠️ Nome do aluno não encontrado, usando padrão');
   }
 
   // Calcular total
   const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
-  console.log('💰 Total calculado:', total);
   document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
 
   // Exibir meses em dívida
@@ -1362,12 +1247,10 @@ async function processarDividasEncontradas(alunoId, dividas) {
     "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
   ];
 
-  console.log('📅 Processando meses em dívida...');
   dividas.forEach(item => {
     const nomeMes = nomesMeses[item.mes - 1];
     const emAtraso = item.em_atraso;
 
-    console.log(`📊 Mês: ${nomeMes} ${item.ano}, Valor: ${item.valor}€, Atraso: ${emAtraso}`);
 
     mesesDivida.innerHTML += `
       <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
@@ -1387,88 +1270,12 @@ async function processarDividasEncontradas(alunoId, dividas) {
 }
 
 // Função de fallback caso a nova função não exista
-async function carregarSaldoAlunoFallback(alunoId) {
-  try {
-    const { data: reservas, error } = await supabaseClient
-      .from("reservas")
-      .select("data, preco, alunos(nome)")
-      .eq("aluno_id", alunoId)
-      .eq("ativa", true);
-
-    if (error) {
-      handleError(error, "Erro ao carregar histórico do aluno");
-      return;
-    }
-
-    if (!reservas || reservas.length === 0) {
-      document.getElementById("tituloAluno").innerText = "Sem registros";
-      document.getElementById("valorTotal").innerText = "€0.00";
-      document.getElementById("mesesDivida").innerHTML = "";
-      document.getElementById("btnLiquidarTotal").style.display = "none";
-      return;
-    }
-
-    document.getElementById("tituloAluno").innerText = reservas[0].alunos.nome;
-
-    let total = 0;
-    const porMes = {};
-
-    reservas.forEach(r => {
-      total += Number(r.preco);
-      const d = new Date(r.data);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      porMes[key] = (porMes[key] || 0) + Number(r.preco);
-    });
-
-    document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
-
-    const hoje = new Date();
-    const mesesDivida = document.getElementById("mesesDivida");
-    mesesDivida.innerHTML = "";
-
-    const mesesOrdenados = Object.entries(porMes).sort((a, b) => {
-      const [anoA, mesA] = a[0].split("-");
-      const [anoB, mesB] = b[0].split("-");
-      return new Date(anoB, mesB - 1) - new Date(anoA, mesA - 1);
-    });
-
-    const nomesMeses = [
-      "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
-    ];
-
-    mesesOrdenados.forEach(([key, valor]) => {
-      const [ano, mes] = key.split("-");
-      const limite = new Date(parseInt(ano), parseInt(mes) - 1, 15);
-      const emAtraso = hoje > limite;
-      const nomeMes = nomesMeses[parseInt(mes) - 1];
-
-      mesesDivida.innerHTML += `
-        <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
-          <span>${nomeMes} ${ano}</span>
-          <strong>${valor.toFixed(2)}€</strong>
-          <button class="${emAtraso ? 'btn-atraso' : ''}" onclick="liquidarMes('${alunoId}', ${ano}, ${parseInt(mes)})">
-            ${emAtraso ? '⚠️ Liquidar' : 'Liquidar mês'}
-          </button>
-        </div>
-      `;
-    });
-
-    const btnLiquidar = document.getElementById("btnLiquidarTotal");
-    btnLiquidar.classList.remove("hidden");
-    btnLiquidar.style.display = "block";
-
-  } catch (err) {
-    handleError(err, "Erro ao processar dados do aluno");
-  }
-}
 
 /* =============================
    CANTINA — AÇÕES DE LIQUIDAÇÃO
 ============================= */
 
 async function liquidarDividaTotal(alunoId) {
-  console.log("💰 Liquidando dívida total do aluno:", alunoId);
   
   if (!alunoId) {
     mostrarErro("Erro", "Aluno inválido. Volte atrás e tente novamente.");
@@ -1476,7 +1283,6 @@ async function liquidarDividaTotal(alunoId) {
   }
 
   if (!await confirmar("Liquidar Dívida", "Tem certeza que deseja liquidar TODA a dívida deste aluno?")) {
-    console.log("❌ Operação cancelada pelo utilizador");
     return;
   }
 
@@ -1540,7 +1346,6 @@ async function liquidarDividaTotal(alunoId) {
         `Dívida liquidada com sucesso! (${mesesLiquidados} mês${mesesLiquidados !== 1 ? 'es' : ''}) - Valor: ${totalLiquidado.toFixed(2)}€`);
     }
     
-    console.log("✅ Dívida liquidada para aluno:", alunoId);
     
     // Recarregar dados do aluno
     setTimeout(() => {
@@ -1584,7 +1389,6 @@ async function liquidarMes(alunoId, ano, mes) {
 
     if (data && data.length > 0) {
       const resultado = data[0];
-      console.log('🔍 Resultado da liquidação:', resultado);
       
       if (!resultado.success) {
         mostrarErro("Erro", resultado.message || "Erro ao liquidar mês");
@@ -1599,7 +1403,6 @@ async function liquidarMes(alunoId, ano, mes) {
       }
     }
     
-    console.log(`✅ Mês ${mes}/${ano} liquidado para aluno:`, alunoId);
     
     // Recarregar dados do aluno
     setTimeout(() => {
@@ -1629,10 +1432,6 @@ function esconderTodasPaginas() {
     .forEach(p => p.classList.add("hidden"));
 }
 
-function voltarCantina() {
-  esconderTodasPaginas();
-  show("paginaCantina");
-}
 
 // Só permite relatório do mês atual e do mês anterior (este último apenas até dia 15)
 function preencherRelatorioPeriodos() {
@@ -1743,7 +1542,6 @@ function exportarRelatorioExcel(dados, ano, mes) {
 ============================= */
 
 async function exportarSaldosExcel() {
-  console.log("📥 Iniciando exportação de valores em dívidas...");
   
   const { data, error } = await supabaseClient
     .from("reservas")
@@ -1805,7 +1603,6 @@ async function exportarSaldosExcel() {
   const nomeFicheiro = `valores_em_divida_${data_hora}.xlsx`;
   
   XLSX.writeFile(wb, nomeFicheiro);
-  console.log("✅ Ficheiro exportado:", nomeFicheiro);
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
 
@@ -1815,7 +1612,6 @@ async function exportarHistoricoAluno() {
     return;
   }
 
-  console.log("📥 Iniciando exportação de histórico do aluno:", alunoAtual);
 
   const { data: aluno } = await supabaseClient
     .from("alunos")
@@ -1889,7 +1685,6 @@ async function exportarHistoricoAluno() {
   const nomeFicheiro = `historico_${aluno.nome.replace(/\s+/g, '_')}_${data_hora}.xlsx`;
 
   XLSX.writeFile(wb, nomeFicheiro);
-  console.log("✅ Ficheiro exportado:", nomeFicheiro);
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
 

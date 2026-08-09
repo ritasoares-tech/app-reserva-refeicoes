@@ -6,7 +6,6 @@ function waitForSupabase() {
   return new Promise(resolve => {
     if(window.supabaseClient) {
       supabaseClient = window.supabaseClient;
-      console.log("✅ supabaseClient disponível");
       resolve();
       return;
     }
@@ -14,7 +13,6 @@ function waitForSupabase() {
     const checkInterval = setInterval(() => {
       if(window.supabaseClient) {
         supabaseClient = window.supabaseClient;
-        console.log("✅ supabaseClient disponível após aguardar");
         clearInterval(checkInterval);
         resolve();
       }
@@ -47,20 +45,16 @@ let elements = {};
 
 // Função para recarregar elementos (após DOM estar pronto)
 function loadElements() {
-  console.log("🔄 Carregando elementos do DOM...");
   
   elements = {
     login: getEl("login"),
     email: getEl("email"),
     password: getEl("password"),
     btnLogin: getEl("btnLogin"),
-    menuSelect: getEl("menuSelect"),
     alunoMenuSelect: getEl("alunoMenuSelect"),
     cantinaMenuSelect: getEl("cantinaMenuSelect"),
-    menuTitle: getEl("menuTitle"),
     alunoMenuTitle: getEl("alunoMenuTitle"),
     cantinaMenuTitle: getEl("cantinaMenuTitle"),
-    buttons: getEl("buttons"),
     alunoButtons: getEl("alunoButtons"),
     cantinButtons: getEl("cantinButtons"),
     saldoAluno: getEl("saldo"),
@@ -75,7 +69,6 @@ function loadElements() {
   };
   
   const elementosCarregados = Object.keys(elements).filter(k => elements[k]);
-  console.log("✅ Elementos carregados:", elementosCarregados.length, "de", Object.keys(elements).length);
   if(elementosCarregados.length < Object.keys(elements).length) {
     const elementosFaltosos = Object.keys(elements).filter(k => !elements[k]);
     console.warn("⚠️ Elementos faltosos:", elementosFaltosos);
@@ -84,13 +77,35 @@ function loadElements() {
   // Attach event listeners para botões importantes
   if (elements.btnAddMenu) {
     elements.btnAddMenu.addEventListener("click", addMenu);
-    console.log("✅ Event listener do 'btnAddMenu' atribuído");
   }
 }
 
 /* ==============================
    FUNÇÕES UTILITÁRIAS
 ============================== */
+
+// Estes dois viviam noutros ficheiros: o formatarData EM DUPLICADO no aluno.js e
+// no cantina.js, com corpos idênticos, e o escapeHtml só no cantina.js. Os
+// quatro scripts partilham o mesmo escopo global, por isso funcionava — o
+// aluno.js definia o formatarData depois e ganhava, sem ninguém reparar. E o
+// aluno.js passou a precisar de escapar texto, e não deve depender de um
+// ajudante definido no ficheiro da cantina. Mesmos corpos, só mudaram de sítio.
+function formatarData(dataISO) {
+  if (!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+function escapeHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const show = id => {
   document.querySelectorAll(".container").forEach(c => c.classList.add("hidden"));
   getEl(id) && getEl(id).classList.remove("hidden");
@@ -493,7 +508,6 @@ function handleError(error, mensagemFallback = 'Erro ao processar operação') {
    LOGIN / LOGOUT
 ============================== */
 async function login(){
-  console.log("🔐 Iniciando login...", { supabaseClient: !!supabaseClient });
   
   if(!elements.email || !elements.password) {
     mostrarErro("Erro", "Formulário não encontrado");
@@ -523,7 +537,6 @@ async function login(){
   }
 
   currentUser = data.user;
-  console.log("✅ Autenticado com sucesso", currentUser.email);
 
   // 1) Fonte de verdade segura: a tabela user_roles (o role vive na BD, não no browser)
   const { data: roles } = await supabaseClient
@@ -532,17 +545,17 @@ async function login(){
     .eq("user_id", currentUser.id);
 
   if (roles && roles.length) {
-    if (roles.some(r => r.role === "cantina")) { role = "cantina"; console.log("✅ Role (user_roles): cantina"); menu(); return; }
-    if (roles.some(r => r.role === "aluno"))   { role = "aluno";   console.log("✅ Role (user_roles): aluno");   menu(); return; }
+    if (roles.some(r => r.role === "cantina")) { role = "cantina"; menu(); return; }
+    if (roles.some(r => r.role === "aluno"))   { role = "aluno";   menu(); return; }
   }
 
   // 2) Fallback temporário (enquanto a migração de segurança não está aplicada):
   //    ainda decide pelo email nas tabelas antigas.
   const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", email);
-  if(aluno && aluno.length){ role = "aluno"; console.log("⚠️ Role (fallback): aluno"); menu(); return; }
+  if(aluno && aluno.length){ role = "aluno"; menu(); return; }
 
   const { data: cantina } = await supabaseClient.from("cantina").select("id").eq("email", email);
-  if(cantina && cantina.length){ role = "cantina"; console.log("⚠️ Role (fallback): cantina"); menu(); return; }
+  if(cantina && cantina.length){ role = "cantina"; menu(); return; }
 
   mostrarErro("Acesso Negado", "Utilizador autenticado mas sem role atribuído.");
   console.error("❌ Utilizador sem role em user_roles nem em aluno/cantina");

@@ -3,11 +3,8 @@
 /* ==============================
    ALUNO — MENU POR DATA E RESERVAS
 ============================== */
-function formatarData(dataISO) {
-  if (!dataISO) return "";
-  const [ano, mes, dia] = dataISO.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
+/* formatarData vive agora no app.js, com o escapeHtml. */
+
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
 let _reservasAtivasMenu = {};      // menu_id -> true (já reservado pelo aluno)
