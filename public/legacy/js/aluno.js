@@ -644,12 +644,12 @@ function _cartaoReserva(r, ctx){
           <div style="color:${statusCor}; font-size:12px; margin-top:4px; margin-left:28px;">${statusTexto}</div>
         </div>
         ${podeDieta && !r.is_dieta ? `
-          <button onclick="trocarDieta('${r.id}', true)" style="padding:6px 10px; font-size:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; cursor:pointer;">
+          <button onclick="trocarDieta('${r.id}', true)" style="padding:6px 10px; font-size:12px; background:#fff3cd; color:#333; border:1px solid #ffc107; border-radius:4px; cursor:pointer;">
             🥗 Dieta
           </button>
         ` : ""}
         ${podeDieta && r.is_dieta ? `
-          <button onclick="trocarDieta('${r.id}', false)" style="padding:6px 10px; font-size:12px; background:#e2e3e5; border:1px solid #6c757d; border-radius:4px; cursor:pointer;">
+          <button onclick="trocarDieta('${r.id}', false)" style="padding:6px 10px; font-size:12px; background:#e2e3e5; color:#333; border:1px solid #6c757d; border-radius:4px; cursor:pointer;">
             🍽️ Normal
           </button>
         ` : ""}

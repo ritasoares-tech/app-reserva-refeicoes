@@ -1079,10 +1079,10 @@ function _cartoesHistoricoDia(iso){
         ${_estadoReserva(r).texto}
       </div>
       ${podeAlterar ? `
-        <div style="display:flex;gap:6px;margin-top:8px;">
-          <button onclick="alterarReservaDireto('${r.id}', 'cancelar')" style="flex:1;padding:6px;font-size:12px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;">Cancelar</button>
-          <button onclick="alterarReservaDireto('${r.id}', 'dieta')" style="flex:1;padding:6px;font-size:12px;background:#ffc107;color:#333;border:none;border-radius:4px;cursor:pointer;">Dieta</button>
-          <button onclick="alterarReservaDireto('${r.id}', 'normal')" style="flex:1;padding:6px;font-size:12px;background:#e2e3e5;color:#333;border:1px solid #6c757d;border-radius:4px;cursor:pointer;">Normal</button>
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <button onclick="alterarReservaDireto('${r.id}', 'cancelar')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;">Cancelar</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'dieta')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#ffc107;color:#333;border:none;border-radius:4px;cursor:pointer;">Dieta</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'normal')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#e2e3e5;color:#333;border:1px solid #6c757d;border-radius:4px;cursor:pointer;">Normal</button>
         </div>
       ` : ""}
     </div>
@@ -1943,11 +1943,15 @@ function _cartaoPedido(p){
       <div style="font-size:12px; color:#888; margin-bottom:8px;">
         Cancelamentos aprovados nos últimos 30 dias: ${p.cancelamentos_30_dias}
       </div>
+      <!-- flex:1 1 auto, NAO flex:1. O flex:1 e flex:1 1 0%, e uma base zero
+           iguala as larguras ignorando o conteudo, o que cortava o ultimo "r"
+           do "Cancelar". Com base auto a largura parte do texto e o
+           min-width:auto impede o botao de encolher abaixo dele. -->
       <div style="display:flex; gap:6px; flex-wrap:wrap;">
-        <button onclick="decidirPedido('${p.solicitacao_id}', 'cancelar')" style="flex:1; padding:8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancelar</button>
-        <button onclick="decidirPedido('${p.solicitacao_id}', 'dieta')" style="flex:1; padding:8px; background:#ffc107; color:#333; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Dieta</button>
-        <button onclick="decidirPedido('${p.solicitacao_id}', 'outros')" style="flex:1; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Outros</button>
-        <button onclick="rejeitarPedido('${p.solicitacao_id}')" style="flex:1; padding:8px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Rejeitar</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'cancelar')" style="flex:1 1 auto; padding:8px 10px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancelar</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'dieta')" style="flex:1 1 auto; padding:8px 10px; background:#ffc107; color:#333; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Dieta</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'outros')" style="flex:1 1 auto; padding:8px 10px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Outros</button>
+        <button onclick="rejeitarPedido('${p.solicitacao_id}')" style="flex:1 1 auto; padding:8px 10px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Rejeitar</button>
       </div>
     </div>
   `;
