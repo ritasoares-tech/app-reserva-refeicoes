@@ -688,6 +688,56 @@ async function cancelarReserva(reservaId, keyMes) {
   }
 }
 
+// Pedido de cancelamento especial. So aparece quando o limite mensal ja foi
+// gasto - o prazo das 9:00 nao tem excecao nenhuma e nao chega aqui.
+async function pedirCancelamentoEspecial(reservaId) {
+  const r = await showModal({
+    icon: "📩",
+    type: "warning",
+    title: "Pedir Cancelamento Especial",
+    message: "Já usaste os 2 cancelamentos deste mês. Explica a situação e a cantina decide.",
+    fields: [
+      { id: "motivo",           type: "textarea", label: "Motivo", required: true },
+      { id: "trocaPorLanche",   type: "checkbox", label: "Prefiro trocar por um lanche" },
+      { id: "lancheSubstituto", type: "text",     label: "Qual lanche?", revealedBy: "trocaPorLanche" }
+    ],
+    buttons: [
+      { text: "Voltar",        type: "secondary", resolve: false },
+      { text: "Enviar pedido", type: "primary",   resolve: true  }
+    ]
+  });
+
+  if (!r) return;   // null = Voltar ou clique fora. Falha fechada.
+
+  showLoading("⏳ A enviar pedido...");
+
+  try {
+    const { error } = await supabaseClient.rpc("solicitar_cancelamento_especial", {
+      p_reserva_id: reservaId,
+      p_motivo: r.motivo,
+      p_troca_por_lanche: !!r.trocaPorLanche,
+      p_lanche_substituto: r.trocaPorLanche ? (r.lancheSubstituto || null) : null
+    });
+
+    hideLoading();
+
+    if (error) {
+      // "Já existe um pedido pendente" quer dizer ecrã desatualizado: recarregar,
+      // não insistir. Mesma forma que o RES01 do Cluster 1.
+      await mostrarErro("Erro ao Enviar Pedido", error.message || "Erro inesperado");
+      showAlunoReservas();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Enviado", "A cantina vai analisar o teu pedido.");
+    showAlunoReservas();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao enviar pedido");
+  } finally {
+    hideLoading();
+  }
+}
+
 // Troca reversível nos dois sentidos, até ao prazo do almoço (9:00 do próprio dia).
 async function trocarDieta(reservaId, paraDieta) {
   if (!await confirmar(

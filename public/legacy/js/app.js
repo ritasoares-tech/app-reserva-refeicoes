@@ -197,15 +197,46 @@ function showModal(config) {
                        config.type === 'warning' ? 'modal-warning' : '';
     modal.className = `modal-content ${modalClass}`;
     
+    // Campos opcionais. Sem config.fields nada disto corre e o showModal
+    // comporta-se exatamente como antes - a extensao e aditiva de propria
+    // vontade, porque este modal e partilhado pelos dois papeis.
+    const fields = config.fields || [];
+    const domIdOf = (id) => `modal${id.charAt(0).toUpperCase()}${id.slice(1)}`;
+
     let html = `
       <div class="modal-header">
         <span>${config.icon || 'ℹ️'}</span>
         <div class="modal-title">${config.title}</div>
       </div>
       <div class="modal-message">${config.message}</div>
-      <div class="modal-buttons">
     `;
-    
+
+    if (fields.length) {
+      html += `<div style="text-align:left; margin-bottom:12px;">`;
+      fields.forEach(f => {
+        const id = domIdOf(f.id);
+        if (f.type === 'checkbox') {
+          html += `
+            <label style="display:block; margin-bottom:8px; font-size:14px; cursor:pointer;">
+              <input type="checkbox" id="${id}"> ${f.label}
+            </label>`;
+          return;
+        }
+        const escondido = f.revealedBy ? ' display:none;' : '';
+        const campo = f.type === 'textarea'
+          ? `<textarea id="${id}" rows="3" style="width:100%; box-sizing:border-box;"></textarea>`
+          : `<input type="text" id="${id}" style="width:100%; box-sizing:border-box;">`;
+        html += `
+          <div id="${id}Wrap" style="margin-bottom:8px;${escondido}">
+            <label for="${id}" style="display:block; font-size:13px; margin-bottom:4px;">${f.label}</label>
+            ${campo}
+          </div>`;
+      });
+      html += `<div id="modalFieldError" style="display:none; color:#dc3545; font-size:13px;"></div></div>`;
+    }
+
+    html += `<div class="modal-buttons">`;
+
     if (config.buttons && config.buttons.length) {
       config.buttons.forEach(btn => {
         const btnClass = btn.type === 'primary' ? 'modal-button-primary' :
@@ -221,20 +252,68 @@ function showModal(config) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     
+    // Mostrar o campo so quando a caixa correspondente esta marcada. Sem isto
+    // o campo do lanche ficava escondido para sempre.
+    fields.filter(f => f.revealedBy).forEach(f => {
+      const box  = modal.querySelector(`#${domIdOf(f.revealedBy)}`);
+      const wrap = modal.querySelector(`#${domIdOf(f.id)}Wrap`);
+      if (!box || !wrap) return;
+      box.addEventListener('change', () => {
+        wrap.style.display = box.checked ? '' : 'none';
+      });
+    });
+
+    // Ler os valores ANTES de remover o overlay. Fazer ao contrario era a
+    // razao pela qual esta funcao nao conseguia recolher nada.
+    const recolher = () => {
+      const out = {};
+      fields.forEach(f => {
+        const el = modal.querySelector(`#${domIdOf(f.id)}`);
+        if (!el) return;
+        if (f.type === 'checkbox') { out[f.id] = el.checked; return; }
+        const visivel = !f.revealedBy || modal.querySelector(`#${domIdOf(f.revealedBy)}`)?.checked;
+        out[f.id] = visivel ? el.value.trim() : null;
+      });
+      return out;
+    };
+
+    const emFalta = () => fields.find(f => {
+      if (!f.required) return false;
+      const el = modal.querySelector(`#${domIdOf(f.id)}`);
+      return !el || !el.value.trim();
+    });
+
     // Resolver modal
     modal.querySelectorAll('.modal-button').forEach(button => {
-    button.addEventListener('click', () => {
-    const value = button.dataset.resolve === 'true';
-    overlay.remove();
-    resolve(value);
+      button.addEventListener('click', () => {
+        const value = button.dataset.resolve === 'true';
+
+        if (fields.length && value) {
+          const falta = emFalta();
+          if (falta) {
+            const erro = modal.querySelector('#modalFieldError');
+            erro.textContent = `${falta.label} é obrigatório.`;
+            erro.style.display = 'block';
+            return;                      // o modal fica aberto
+          }
+          const valores = recolher();
+          overlay.remove();
+          resolve(valores);
+          return;
+        }
+
+        overlay.remove();
+        // Com campos, desistir devolve null em vez de false: null e falsy, por
+        // isso quem se esquecer de verificar falha fechado.
+        resolve(fields.length ? null : value);
+      });
     });
-  });
-    
+
     // Fechar ao clicar fora
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay && config.canClose !== false) {
         overlay.remove();
-        resolve(false);
+        resolve(fields.length ? null : false);
       }
     });
   });
