@@ -388,6 +388,18 @@ async function showAlunoReservas(){
 
     _reservasAluno = reservas || [];
 
+    // Os pedidos de cancelamento especial do próprio aluno. A política
+    // "Aluno vê os seus pedidos" (005 PASSO 2) já limita isto a ele, por isso
+    // não há filtro nenhum a acrescentar do lado do cliente.
+    const { data: pedidos, error: erroPedidos } = await supabaseClient
+      .from("cancelamentos_especiais")
+      .select("id, reserva_id, status, criado_em")
+      .order("criado_em", { ascending: false });
+
+    // Um erro aqui não pode derrubar o ecrã das reservas: sem pedidos, os
+    // cartões voltam ao comportamento anterior a este cluster.
+    _pedidosAluno = erroPedidos ? [] : (pedidos || []);
+
     if(!_mesReservasView){
       const h = new Date();
       _mesReservasView = new Date(h.getFullYear(), h.getMonth(), 1);
@@ -405,6 +417,7 @@ async function showAlunoReservas(){
 
 /* Estado do calendário de reservas do aluno */
 let _reservasAluno = [];
+let _pedidosAluno = [];           // cancelamentos especiais do próprio aluno
 let _mesReservasView = null;      // primeiro dia do mês em visualização
 let _diaReservaSelecionado = null; // data ISO do dia selecionado
 
@@ -564,12 +577,17 @@ function _contextoReservas(){
     reservasPorMenu[r.data][r.tipo].push(r);
   });
 
-  return { cancelamentosUsuarioMesAlmoco, reservasPorMenu };
+  const pedidosPorReserva = {};
+  _pedidosAluno.forEach(p => {
+    (pedidosPorReserva[p.reserva_id] = pedidosPorReserva[p.reserva_id] || []).push(p);
+  });
+
+  return { cancelamentosUsuarioMesAlmoco, reservasPorMenu, pedidosPorReserva };
 }
 
 // Cartão individual de uma reserva (com ações: cancelar / dieta / reativar)
 function _cartaoReserva(r, ctx){
-  const { cancelamentosUsuarioMesAlmoco, reservasPorMenu } = ctx;
+  const { cancelamentosUsuarioMesAlmoco, reservasPorMenu, pedidosPorReserva } = ctx;
   const d = new Date(r.data);
   const keyMes = `${d.getFullYear()}-${d.getMonth()+1}`;
 
@@ -595,6 +613,12 @@ function _cartaoReserva(r, ctx){
 
   const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
   const mostrarAvisoLimite = r.tipo === "almoco" && !podeCancelar && estaAtiva && cancelamentosAtuais >= 2;
+
+  // Pendente ganha ao rejeitado: é o estado atual. 'aprovado' não mostra nada —
+  // a própria reserva já mostra o resultado (cancelada, ou com o ícone de dieta).
+  const pedidos = (pedidosPorReserva && pedidosPorReserva[r.id]) || [];
+  const pedido = pedidos.find(p => p.status === "pendente")
+              || pedidos.find(p => p.status === "rejeitado");
 
   let statusBg = "#f8f9fa", statusBorda = "#007bff", statusTexto = "✅ Ativa", statusCor = "#28a745";
   if(r.cancelamento_tipo === "user"){
@@ -641,9 +665,19 @@ function _cartaoReserva(r, ctx){
         </button>
       ` : ""}
       ${mostrarAvisoLimite ? `
-        <button onclick="pedirCancelamentoEspecial('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
-          📩 Pedir cancelamento especial
-        </button>
+        ${pedido ? `
+          <div style="margin-top:8px; padding:8px; border-radius:4px; font-size:13px; font-weight:bold; ${
+            pedido.status === "pendente"
+              ? "background:#e2e3e5; border:1px solid #6c757d; color:#41464b;"
+              : "background:#f8d7da; border:1px solid #dc3545; color:#842029;"
+          }">
+            ${pedido.status === "pendente" ? "⏳ Pedido pendente" : "❌ Pedido rejeitado"}
+          </div>
+        ` : `
+          <button onclick="pedirCancelamentoEspecial('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
+            📩 Pedir cancelamento especial
+          </button>
+        `}
         <div style="margin-top:8px; padding:8px; background-color:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
           ⚠️ Para conseguires cancelar liga à cantina - 914117705
         </div>
