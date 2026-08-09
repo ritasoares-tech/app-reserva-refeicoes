@@ -495,7 +495,7 @@ function _cartoesMenusDia(iso){
           <b>${nomes[m.tipo] || m.tipo}</b>
           <span style="color:#007bff;font-weight:bold;">${preco}€</span>
         </div>
-        ${prato ? `<div style="font-size:13px;color:#555;margin-bottom:8px;">${prato}</div>`
+        ${prato ? `<div style="font-size:13px;color:#555;margin-bottom:8px;">${escapeHtml(prato)}</div>`
                 : `<div style="font-size:13px;color:#999;margin-bottom:8px;">Sem prato</div>`}
         ${acoes}
       </div>
@@ -867,13 +867,18 @@ function exibirAlunosHistorico() {
   }
 
   div.innerHTML = alunosHistoricoFiltrados.map(([id, nome]) => `
-    <div class="aluno-card" onclick="showHistoricoAluno('${id}', '${nome}')">
-      👤 ${nome}
+    <div class="aluno-card" onclick="showHistoricoAluno('${id}')">
+      👤 ${escapeHtml(nome)}
     </div>
   `).join("");
 }
 
-async function showHistoricoAluno(alunoId, alunoNome) {
+// O nome deixou de viajar dentro do onclick. Estava interpolado num literal de
+// string JS dentro de um atributo HTML, por isso um nome com apostrofe - O'Brien
+// - partia o handler todo. Isso e um erro a serio, nao uma hipotese. Agora entra
+// so o id e o nome vem do estado.
+async function showHistoricoAluno(alunoId) {
+  const alunoNome = (alunosHistoricoLista.find(([id]) => id === alunoId) || [])[1] || "";
   alunoHistoricoAtual = alunoId;
   nomeAlunoHistoricoAtual = alunoNome;
 
@@ -1144,7 +1149,7 @@ function renderizarSaldos() {
   const html = saldosFiltrados
     .map(s => `
       <div class="saldo-linha" onclick="showSaldoAluno('${s.id}')">
-        <span class="saldo-nome">${s.nome}</span>
+        <span class="saldo-nome">${escapeHtml(s.nome)}</span>
         <span class="saldo-valor">${Number(s.total).toFixed(2)}€</span>
       </div>
     `)
@@ -1840,7 +1845,7 @@ async function alterarReservaDireto(reservaId, decisao){
     }
 
     await mostrarSucesso("Reserva Alterada", "A reserva foi alterada.");
-    showHistoricoAluno(alunoHistoricoAtual, nomeAlunoHistoricoAtual);
+    showHistoricoAluno(alunoHistoricoAtual);
   } catch (err) {
     await mostrarErro("Erro", err?.message || "Erro inesperado ao alterar reserva");
   } finally {

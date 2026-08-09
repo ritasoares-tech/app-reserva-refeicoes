@@ -232,7 +232,7 @@ function _cartoesReservaDia(iso){
       return `
         <div class="menu">
           ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-          ${m.prato ? "— " + m.prato : ""} (${formatCurrency(m.preco)})
+          ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(m.preco)})
           <br><span style="color:#2e7d32;font-size:13px;">✅ Já reservado</span>
           ${m.tipo === "almoco" ? `
             <br><span style="color:#666;font-size:12px;">O almoço é reservado automaticamente pela cantina.</span>
@@ -250,7 +250,7 @@ function _cartoesReservaDia(iso){
     return `
       <div class="menu">
         ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-        ${m.prato ? "— " + m.prato : ""} (${formatCurrency(m.preco)})${mensagemHorario}
+        ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(m.preco)})${mensagemHorario}
         <br>
         ${podeReservar ? `
           <button onclick="reservarAluno('${m.id}', '${m.data}', '${m.tipo}')">
@@ -635,7 +635,7 @@ function _cartaoReserva(r, ctx){
             <span style="font-weight:bold; color:#333;">${r.tipo === "almoco" && r.is_dieta ? "Almoço (Dieta)" : formatarTipoRefeicao(r.tipo)}</span>
           </div>
           <div style="color:#666; font-size:13px; margin-left:28px;">
-            ${r.menus?.prato ? `${r.menus.prato}` : "-"}
+            ${r.menus?.prato ? escapeHtml(r.menus.prato) : "-"}
             <span style="float:right; color:#007bff; font-weight:bold;">${formatCurrency(r.preco).replace("€", "")}€</span>
           </div>
           <div style="color:${statusCor}; font-size:12px; margin-top:4px; margin-left:28px;">${statusTexto}</div>
