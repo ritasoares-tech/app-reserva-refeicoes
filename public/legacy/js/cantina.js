@@ -813,27 +813,37 @@ async function showCantinaHistorico() {
   const div = document.getElementById("listaAlunosHistorico");
   div.innerHTML = "⏳ A carregar alunos...";
 
+  // A lista vem dos ALUNOS e não das reservas. Antes ia buscar todas as reservas
+  // e removia os repetidos aqui, e o PostgREST corta a resposta nas 1000 linhas
+  // por omissão: com 1195 reservas chegavam 1000, e nessas só havia 125 alunos
+  // distintos dos 149 que têm reservas. A cantina não conseguia abrir o
+  // histórico de 24 alunos, e não havia erro nenhum a dizê-lo — a lista apenas
+  // vinha mais curta. Encontrado a olho, num teste manual: qualquer teste
+  // automático escolhe um aluno que calha estar dentro das primeiras 1000 linhas.
+  //
+  // Assim a lista cresce com o número de alunos e não com o número de refeições,
+  // por isso nunca mais se aproxima do limite. Passam a aparecer também os alunos
+  // sem reservas nenhumas, o que para quem procura um aluno é melhor - e o ecrã
+  // de detalhe já trata desse caso.
   const { data, error } = await supabaseClient
-    .from("reservas")
-    .select("aluno_id, alunos(nome)")
-    .order("aluno_id");
+    .from("alunos")
+    .select("id, nome")
+    .order("nome");
 
   if (error) {
-    div.innerHTML = `<i>❌ Erro: ${error.message}</i>`;
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
     return;
   }
 
   if (!data || data.length === 0) {
-    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem reservas registadas.</div>";
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem alunos registados.</div>";
     document.getElementById("alunosPesquisaBox").style.display = "none";
     return;
   }
 
-  alunosHistoricoLista = [
-    ...new Map(
-      data.map(r => [r.aluno_id, r.alunos.nome])
-    ).entries()
-  ].sort((a, b) => a[1].localeCompare(b[1]));
+  alunosHistoricoLista = data
+    .map(a => [a.id, a.nome])
+    .sort((a, b) => a[1].localeCompare(b[1]));
 
   alunosHistoricoFiltrados = [...alunosHistoricoLista];
 
@@ -887,6 +897,12 @@ async function showHistoricoAluno(alunoId) {
   document.getElementById("btnBackHistorico").style.display = "inline-block";
   document.getElementById("btnBackMenu").style.display = "none";
 
+  // O nome é escrito ANTES de ir buscar as reservas. A lista passou a incluir
+  // alunos sem reserva nenhuma, e nesse caso isto saía pelo return de baixo sem
+  // nunca chegar a dizer de quem era o ecrã que estava a mostrar.
+  // innerText, não innerHTML: o nome não é escapado e não precisa de ser.
+  document.getElementById("NomeAluno").innerText = alunoNome;
+
   const div = document.getElementById("historico");
   div.innerHTML = "⏳ A carregar histórico...";
 
@@ -906,7 +922,7 @@ async function showHistoricoAluno(alunoId) {
     .order("data", { ascending: false });
 
   if (error) {
-    div.innerHTML = `<i>❌ Erro: ${error.message}</i>`;
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
     return;
   }
 
@@ -914,8 +930,7 @@ async function showHistoricoAluno(alunoId) {
     div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem histórico disponível para este aluno.</div>";
     return;
   }
-  
-  document.getElementById("NomeAluno").innerText = alunoNome;
+
   historicoAtual = reservas;
   historicoFiltrado = [...reservas];
   _diaHistSelecionado = null;
