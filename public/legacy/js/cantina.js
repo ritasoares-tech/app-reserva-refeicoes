@@ -1481,34 +1481,23 @@ async function gerarRelatorioMensal() {
   showLoading("⏳ Gerando relatório...");
 
   try {
+    // A soma passou para a base de dados. Antes isto ia buscar TODAS as reservas
+    // ativas e somava-as aqui, e o PostgREST corta a resposta nas 1000 linhas
+    // por omissão — verificado, devolvia exatamente 1000 havendo 1195 reservas.
+    // O Excel já andava a perder alunos sem ninguém dar por isso, porque um
+    // ficheiro com menos linhas não tem ar de estar errado. Com carga a sério um
+    // mês são ~8000 reservas e o relatório apanhava um oitavo delas.
+    // Uma linha por aluno nunca chega perto desse limite.
     const { data, error } = await supabaseClient
-      .from("reservas")
-      .select("aluno_id, preco, alunos(nome), data")
-      .eq("ativa", true);
+      .rpc("relatorio_mensal", { p_ano: ano, p_mes: mes });
 
     if (error) {
-      mostrarErro("Erro", "Erro ao gerar relatório");
+      mostrarErro("Erro", error.message || "Erro ao gerar relatório");
       console.error(error);
       return;
     }
 
-    const reportData = {};
-    data.forEach(r => {
-      const d = new Date(r.data);
-      if (d.getFullYear() === ano && (d.getMonth() + 1) === mes) {
-        if (!reportData[r.aluno_id]) {
-          reportData[r.aluno_id] = {
-            nome: r.alunos.nome,
-            total_refeicoes: 0,
-            total_valor: 0
-          };
-        }
-        reportData[r.aluno_id].total_refeicoes += 1;
-        reportData[r.aluno_id].total_valor += Number(r.preco);
-      }
-    });
-
-    const resultado = Object.values(reportData);
+    const resultado = data || [];
 
     if (!resultado || resultado.length === 0) {
       mostrarInfo("Sem Dados", "Sem dados para este mês");
