@@ -1060,7 +1060,15 @@ function _cartoesHistoricoDia(iso){
   if(!doDia.length) return `<i>Sem reservas neste dia.</i>`;
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   doDia.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
-  return doDia.map(r => `
+
+  // Acção direta só em almoços ativos de hoje em diante: um pedido por telefone
+  // é sempre sobre uma refeição que ainda não foi servida. Dias passados ficam
+  // como histórico, só de leitura.
+  const hoje = new Date().toISOString().split("T")[0];
+
+  return doDia.map(r => {
+    const podeAlterar = r.tipo === "almoco" && r.ativa && r.data >= hoje;
+    return `
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:12px;margin-bottom:10px;text-align:left;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <b>${formatarTipoRefeicao(r.tipo)}${r.is_dieta ? " 🥗" : ""}</b>
@@ -1070,8 +1078,16 @@ function _cartoesHistoricoDia(iso){
       <div class="${_estadoReserva(r).classe}" style="font-size:12px;">
         ${_estadoReserva(r).texto}
       </div>
+      ${podeAlterar ? `
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button onclick="alterarReservaDireto('${r.id}', 'cancelar')" style="flex:1;padding:6px;font-size:12px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;">Cancelar</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'dieta')" style="flex:1;padding:6px;font-size:12px;background:#ffc107;color:#333;border:none;border-radius:4px;cursor:pointer;">Dieta</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'normal')" style="flex:1;padding:6px;font-size:12px;background:#e2e3e5;color:#333;border:1px solid #6c757d;border-radius:4px;cursor:pointer;">Normal</button>
+        </div>
+      ` : ""}
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function exibirHistoricoFiltrado() {
@@ -1994,6 +2010,40 @@ async function rejeitarPedido(solicitacaoId){
     showPedidosCancelamento();
   } catch (err) {
     await mostrarErro("Erro", err?.message || "Erro inesperado ao rejeitar");
+  } finally {
+    hideLoading();
+  }
+}
+
+const _ROTULO_DIRETO = {
+  cancelar: "cancelar esta reserva",
+  dieta:    "passar esta reserva a dieta",
+  normal:   "voltar esta reserva a prato normal"
+};
+
+// Para quando o aluno telefona em vez de usar a app. A função da 005 deixa
+// rasto em cancelamentos_especiais sozinha, já como 'aprovado'.
+async function alterarReservaDireto(reservaId, decisao){
+  if(!await confirmar("Alterar Reserva", `Confirmas ${_ROTULO_DIRETO[decisao]}?`)) return;
+
+  showLoading("⏳ A alterar...");
+  try {
+    const { error } = await supabaseClient.rpc("cantina_alterar_reserva", {
+      p_reserva_id: reservaId,
+      p_decisao: decisao,
+      p_nota: null
+    });
+    hideLoading();
+
+    if(error){
+      await mostrarErro("Erro ao Alterar", error.message || "Erro inesperado");
+      return;
+    }
+
+    await mostrarSucesso("Reserva Alterada", "A reserva foi alterada.");
+    showHistoricoAluno(alunoHistoricoAtual, nomeAlunoHistoricoAtual);
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao alterar reserva");
   } finally {
     hideLoading();
   }
