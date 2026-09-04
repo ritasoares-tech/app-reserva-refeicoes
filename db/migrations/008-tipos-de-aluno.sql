@@ -14,7 +14,9 @@
 -- O QUE NAO MUDA, E TEM DE CONTINUAR A NAO MUDAR
 --   1. O reservas.preco e imutavel (reservas_guard, ramo UPDATE, desde a 003).
 --      Uma refeicao marcada antes de um aluno mudar de tipo fica com o preco
---      com que foi marcada. Isto NAO se toca aqui.
+--      com que foi marcada. UMA excecao, decidida pelo Pedro a 2026-09-04: um
+--      almoco cancelado PELA mudanca de contrato e depois voltado a marcar e uma
+--      marcacao nova e leva o preco de hoje - ver a seccao 3.
 --   2. saldos_por_aluno (007) e relatorio_mensal somam reservas.preco e nunca
 --      recalculam a partir dos menus. Nao mudam.
 --
@@ -124,6 +126,39 @@ COMMIT;
 -- =============================================================================
 BEGIN;
 
+-- A regra do preco num sitio so, usada pelo guard no INSERT e na unica
+-- excecao do UPDATE: o do menu, salvo o almoco de quem nao tem contrato, que e
+-- o da configuracao. Levanta em vez de cair no preco do menu - ver acima.
+CREATE OR REPLACE FUNCTION public.preco_para_reserva(p_aluno_id uuid, p_tipo text, p_preco_menu numeric)
+RETURNS numeric LANGUAGE plpgsql SECURITY DEFINER SET search_path = public STABLE AS $fn$
+DECLARE
+  v_contrato boolean;
+  v_preco_sc numeric;
+BEGIN
+  IF p_tipo <> 'almoco' THEN
+    RETURN p_preco_menu;
+  END IF;
+
+  SELECT a.tem_contrato INTO v_contrato FROM alunos a WHERE a.id = p_aluno_id;
+  IF NOT FOUND THEN
+    -- Inalcancavel enquanto aluno_id tiver FK para alunos. Rede, nao caso.
+    RAISE EXCEPTION 'Aluno inexistente' USING ERRCODE = 'RES08';
+  END IF;
+
+  IF v_contrato THEN
+    RETURN p_preco_menu;
+  END IF;
+
+  SELECT c.preco_almoco_sem_contrato INTO v_preco_sc FROM configuracao c;
+  IF v_preco_sc IS NULL THEN
+    RAISE EXCEPTION 'Preco do almoco sem contrato nao configurado' USING ERRCODE = 'RES09';
+  END IF;
+  RETURN v_preco_sc;
+END; $fn$;
+
+-- So o guard a chama; ninguem da aplicacao precisa dela.
+REVOKE EXECUTE ON FUNCTION public.preco_para_reserva(uuid, text, numeric) FROM PUBLIC, anon, authenticated;
+
 -- O reservas_guard (003, F6) ja escrevia NEW.preco := menus.preco em TODAS as
 -- insercoes, viessem de triggers, de RPCs, da cantina ou de SQL a mao. E o
 -- unico sitio onde o preco se decide, por isso e o unico sitio que aprende o
@@ -134,7 +169,12 @@ BEGIN;
 -- de defeito que este projeto ja encontrou tres vezes. Falhar alto no INSERT e
 -- estritamente melhor do que cobrar a menos numa fatura.
 --
--- O ramo UPDATE NAO MUDA. E ele que congela o preco de uma reserva ja feita.
+-- O ramo UPDATE congela o preco de uma reserva ja feita, COM UMA EXCECAO,
+-- decidida pelo Pedro a 2026-09-04: um almoco cancelado pela mudanca de
+-- contrato ('contrato') que o aluno volta a marcar ('reactivated') e uma
+-- marcacao NOVA em condicoes novas, e leva o preco que um INSERT levaria hoje -
+-- o do menu se o aluno voltou a ter contrato, o da configuracao se nao. Todas
+-- as outras reativacoes ('user' -> 'reactivated') continuam congeladas.
 CREATE OR REPLACE FUNCTION public.reservas_guard()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
 DECLARE
@@ -155,25 +195,7 @@ BEGIN
     NEW.tipo := m.tipo;
     NEW.data := m.data;
 
-    -- 008: o almoco de um aluno sem contrato tem o preco da configuracao.
-    IF m.tipo = 'almoco' THEN
-      SELECT a.tem_contrato INTO v_contrato FROM alunos a WHERE a.id = NEW.aluno_id;
-      IF NOT FOUND THEN
-        -- Inalcancavel enquanto aluno_id tiver FK para alunos. Rede, nao caso.
-        RAISE EXCEPTION 'Aluno inexistente' USING ERRCODE = 'RES08';
-      END IF;
-    END IF;
-
-    IF m.tipo = 'almoco' AND NOT v_contrato THEN
-      SELECT c.preco_almoco_sem_contrato INTO v_preco_sc FROM configuracao c;
-      IF v_preco_sc IS NULL THEN
-        RAISE EXCEPTION 'Preco do almoco sem contrato nao configurado'
-          USING ERRCODE = 'RES09';
-      END IF;
-      NEW.preco := v_preco_sc;
-    ELSE
-      NEW.preco := m.preco;
-    END IF;
+    NEW.preco := public.preco_para_reserva(NEW.aluno_id, m.tipo, m.preco);
 
     IF NOT v_sistema AND NOT v_staff THEN
       IF NEW.aluno_id <> v_uid THEN
@@ -193,9 +215,16 @@ BEGIN
     NEW.menu_id    := OLD.menu_id;
     NEW.data       := OLD.data;
     NEW.tipo       := OLD.tipo;
-    NEW.preco      := OLD.preco;
     NEW.criado_em  := OLD.criado_em;
     NEW.automatico := OLD.automatico;
+
+    IF OLD.cancelamento_tipo = 'contrato' AND NEW.cancelamento_tipo = 'reactivated' THEN
+      -- A excecao descrita no cabecalho: marcacao nova, preco de hoje.
+      SELECT preco INTO m FROM menus WHERE id = OLD.menu_id;
+      NEW.preco := public.preco_para_reserva(OLD.aluno_id, OLD.tipo, m.preco);
+    ELSE
+      NEW.preco := OLD.preco;
+    END IF;
 
     IF NOT v_sistema AND NOT v_staff THEN
       IF NEW.cancelamento_tipo IS DISTINCT FROM OLD.cancelamento_tipo THEN

@@ -8,7 +8,7 @@
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
 let _reservasAtivasMenu = {};      // menu_id -> { automatico } (já reservado pelo aluno)
-let _reservasCanceladasMenu = {};  // menu_id -> { preco } (cancelado por si ou pela cantina; permite "Voltar a Reservar")
+let _reservasCanceladasMenu = {};  // menu_id -> { preco, tipo } (cancelado por si ou pela cantina; permite "Voltar a Reservar")
 let _alunoTemContrato = true;         // lido em showAlunoMenu; true é o comportamento de sempre (008)
 let _precoAlmocoSemContrato = null;   // configuracao.preco_almoco_sem_contrato (008)
 let _mesMenuView = null;           // primeiro dia do mês em visualização
@@ -50,7 +50,7 @@ async function showAlunoMenu() {
     _reservasCanceladasMenu = {};
     reservas?.forEach(r => {
       if(r.ativa) _reservasAtivasMenu[r.menu_id] = { automatico: !!r.automatico };
-      else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = { preco: Number(r.preco) };
+      else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = { preco: Number(r.preco), tipo: r.cancelamento_tipo };
     });
 
     // O tipo de aluno e o preço do almoço sem contrato (008). O aluno lê a sua
@@ -236,16 +236,20 @@ function _cartoesReservaDia(iso){
   const menusDia = _menusAluno.filter(m => m.data === iso);
   if(!menusDia.length) return `<i>Sem menus neste dia.</i>`;
 
-  // O preço que ESTE aluno paga. Uma reserva cancelada que se volta a marcar é
-  // REATIVADA - a linha é a mesma e o reservas_guard congela-lhe o preço - por
-  // isso mostra-se o preço que essa linha já tem, e não o de uma reserva nova.
-  // Sem linha, é o do menu, salvo o almoço de quem não tem contrato, que é o
-  // da configuração: o mesmo critério do guard no INSERT.
-  const precoPara = m => {
-    if(_reservasCanceladasMenu[m.id]) return _reservasCanceladasMenu[m.id].preco;
-    return (m.tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
+  // O preço que ESTE aluno paga, pelo mesmo critério do reservas_guard:
+  //  - uma reserva que o próprio cancelou e volta a marcar é reativada com o
+  //    preço congelado que a linha já tem;
+  //  - uma reserva cancelada pela cantina ao retirar o contrato, e uma reserva
+  //    nova, levam o preço de hoje: o do menu, salvo o almoço de quem não tem
+  //    contrato, que é o da configuração.
+  const precoHoje = m =>
+    (m.tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
       ? _precoAlmocoSemContrato
       : m.preco;
+  const precoPara = m => {
+    const c = _reservasCanceladasMenu[m.id];
+    if(c && c.tipo === "user") return c.preco;
+    return precoHoje(m);
   };
 
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
