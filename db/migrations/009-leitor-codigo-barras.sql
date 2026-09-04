@@ -104,3 +104,52 @@ REVOKE UPDATE ON public.alunos FROM authenticated;
 GRANT  UPDATE (nome, email) ON public.alunos TO authenticated;
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 3 - O registo das leituras
+-- =============================================================================
+BEGIN;
+
+-- aluno_id ADMITE NULO DE PROPOSITO. Uma leitura de um codigo que nao e de
+-- ninguem - um cartao da biblioteca, um codigo de supermercado, um digito mal
+-- lido - tem de deixar rasto na mesma, com os digitos que foram lidos. Por em
+-- NOT NULL era garantir que o unico caso que mais interessa investigar e o
+-- unico caso que nao deixa registo nenhum.
+--
+-- codigo_lido fica guardado mesmo quando se sabe quem e o aluno: se um dia um
+-- codigo for regerado, o registo continua a mostrar o que foi lido naquele dia.
+--
+-- APPEND-ONLY POR CONSTRUCAO, NAO POR CONVENCAO. As escritas so acontecem
+-- dentro da registar_leitura, que e SECURITY DEFINER. O authenticated leva
+-- SELECT e mais nada - nao ha UPDATE nem DELETE para conceder, por isso nao ha
+-- caminho nenhum para reescrever o registo. Nao e uma regra a pedir que
+-- ninguem o faca.
+--
+-- ON DELETE SET NULL nas duas chaves estrangeiras: o registo sobreviver ao
+-- aluno e a reserva e precisamente o objetivo de um registo.
+CREATE TABLE public.leituras (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  aluno_id    uuid REFERENCES public.alunos(id)   ON DELETE SET NULL,
+  codigo_lido text NOT NULL,
+  tipo        text NOT NULL CHECK (tipo IN ('pequeno_almoco', 'almoco', 'jantar')),
+  data        date NOT NULL,
+  resultado   text NOT NULL CHECK (resultado IN
+                ('servido', 'sem_reserva', 'cancelada', 'repetido', 'codigo_desconhecido')),
+  reserva_id  uuid REFERENCES public.reservas(id) ON DELETE SET NULL,
+  criado_em   timestamptz NOT NULL DEFAULT now(),
+  criado_por  uuid REFERENCES public.cantina(id)
+);
+
+CREATE INDEX leituras_data_tipo_idx  ON public.leituras (data, tipo);
+CREATE INDEX leituras_aluno_data_idx ON public.leituras (aluno_id, data);
+
+ALTER TABLE public.leituras ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL    ON public.leituras FROM PUBLIC, anon, authenticated;
+GRANT  SELECT ON public.leituras TO authenticated;
+
+CREATE POLICY "Cantina ve as leituras" ON public.leituras
+  FOR SELECT TO authenticated
+  USING (EXISTS (SELECT 1 FROM cantina WHERE cantina.id = auth.uid()));
+
+COMMIT;
