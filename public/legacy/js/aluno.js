@@ -1071,3 +1071,59 @@ async function marcarTodasNotificacoesLidas() {
 }
 
 
+
+/* ==============================
+   ALUNO — O MEU CÓDIGO
+============================== */
+
+// Os seis dígitos aparecem por baixo do código de barras em letra grande, e não
+// são decoração: são o plano B para um telemóvel sem bateria, um ecrã partido,
+// ou um leitor laser que não lê ecrãs. Quem está ao balcão lê-os em voz alta ou
+// escreve-os à mão. Ver o risco adiado em backlog.md.
+async function showMeuCodigo(){
+  show("alunoCodigo");
+  const div = document.getElementById("meuCodigo");
+  div.innerHTML = "⏳ A carregar...";
+
+  try {
+    const aluno = await getAlunoAtual();
+
+    const { data, error } = await supabaseClient
+      .from("alunos")
+      .select("codigo")
+      .eq("id", aluno.id)
+      .single();
+
+    if (error || !data || !data.codigo) {
+      div.innerHTML = "<i>❌ Não foi possível obter o teu código.</i>";
+      return;
+    }
+
+    div.innerHTML = `
+      <div style="font-size:18px;font-weight:700;margin-bottom:16px;">
+        ${escapeHtml(aluno.nome)}
+      </div>
+      <div style="background:#fff;padding:20px;border-radius:12px;display:inline-block;">
+        <svg id="svgCodigoBarras"></svg>
+      </div>
+      <div style="font-size:34px;font-weight:800;letter-spacing:6px;margin-top:14px;
+                  font-family:monospace;">
+        ${escapeHtml(data.codigo)}
+      </div>
+      <div style="color:#666;font-size:13px;margin-top:10px;">
+        Mostra este código na cantina.
+      </div>
+    `;
+
+    JsBarcode("#svgCodigoBarras", data.codigo, {
+      format: "CODE128",
+      width: 3,
+      height: 110,
+      displayValue: false,
+      margin: 0
+    });
+  } catch (err) {
+    console.error("❌ Erro ao carregar o código do aluno", err);
+    div.innerHTML = "<i>❌ Não foi possível obter o teu código.</i>";
+  }
+}
