@@ -2031,10 +2031,13 @@ async function showCantinaAlunos(){
   const div = document.getElementById("listaAlunosContrato");
   div.innerHTML = "⏳ A carregar alunos...";
 
-  const { data: cfg } = await supabaseClient
+  const { data: cfg, error: errCfg } = await supabaseClient
     .from("configuracao").select("preco_almoco_sem_contrato").single();
   document.getElementById("precoSemContrato").value =
     cfg ? Number(cfg.preco_almoco_sem_contrato).toFixed(2) : "";
+  // Um campo em branco sem explicação convidava a escrever um preço por cima
+  // de um erro. Dizer o que se passou.
+  if (errCfg) mostrarErro("Erro", "Não foi possível ler o preço do almoço sem contrato: " + errCfg.message);
 
   // Cresce com os alunos, não com as refeições - nunca chega perto do corte
   // das 1000 linhas.

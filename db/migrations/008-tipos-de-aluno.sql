@@ -400,6 +400,54 @@ GRANT  EXECUTE ON FUNCTION public.contar_almocos_automaticos_futuros(uuid) TO au
 COMMIT;
 
 -- =============================================================================
+-- SECCAO 7 - reativar_reserva_cancelada tambem aceita 'contrato' (revisao)
+-- =============================================================================
+BEGIN;
+
+-- Encontrado na revisao independente da 008: o botao "Reativar" das Minhas
+-- Reservas chama esta funcao, que so aceitava 'user'. Sem isto o aluno via um
+-- botao e recebia "Esta reserva nao pode ser reativada" ao carregar nele. A
+-- mesma extensao que a seccao 5 fez ao reservar_refeicao, pela mesma razao.
+--
+-- A funcao vem do esquema original (nao ha migracao dela); fica como estava -
+-- invoker, sem SECURITY DEFINER - so com a lista alargada. A RLS e o
+-- reservas_guard continuam a limitar o aluno as suas proprias linhas e ao prazo.
+CREATE OR REPLACE FUNCTION public.reativar_reserva_cancelada(p_reserva_id uuid)
+RETURNS TABLE(success boolean, message text)
+LANGUAGE plpgsql AS $function$
+DECLARE
+    v_reserva_tipo TEXT;
+    v_aluno_id UUID;
+    v_data DATE;
+BEGIN
+    SELECT cancelamento_tipo, aluno_id, data
+    INTO v_reserva_tipo, v_aluno_id, v_data
+    FROM reservas
+    WHERE id = p_reserva_id;
+
+    IF v_aluno_id IS NULL THEN
+        RETURN QUERY SELECT FALSE, 'Reserva não encontrada'::TEXT;
+        RETURN;
+    END IF;
+
+    -- So se pode reativar o que foi cancelado pelo aluno ou pela mudanca de
+    -- contrato - nunca uma liquidacao ('payment').
+    IF v_reserva_tipo IS NULL OR v_reserva_tipo NOT IN ('user', 'contrato') THEN
+        RETURN QUERY SELECT FALSE, 'Esta reserva não pode ser reativada'::TEXT;
+        RETURN;
+    END IF;
+
+    UPDATE reservas
+    SET cancelamento_tipo = 'reactivated'
+    WHERE id = p_reserva_id;
+
+    RETURN QUERY SELECT TRUE, 'Reserva reativada com sucesso'::TEXT;
+END;
+$function$;
+
+COMMIT;
+
+-- =============================================================================
 -- VERIFICACAO
 -- =============================================================================
 -- 1) Todos os alunos existentes com contrato, e a configuracao com uma linha:
