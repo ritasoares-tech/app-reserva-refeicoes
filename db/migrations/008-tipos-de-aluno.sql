@@ -269,3 +269,168 @@ BEGIN
 END; $$;
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 5 - 'contrato', um cancelamento que nao e do aluno
+-- =============================================================================
+BEGIN;
+
+-- Cancelar os almocos automaticos futuros de quem perde o contrato precisa de
+-- um valor proprio. Reutilizar 'user' dizia que o aluno cancelou, o que e falso
+-- e lhe mostrava um cancelamento que nao fez. A coluna gerada ativa e
+-- (cancelamento_tipo IS NULL OR = 'reactivated'), por isso 'contrato' conta
+-- como inativa sem lhe tocar.
+ALTER TABLE public.reservas DROP CONSTRAINT reservas_cancelamento_tipo_chk;
+ALTER TABLE public.reservas ADD  CONSTRAINT reservas_cancelamento_tipo_chk
+  CHECK (cancelamento_tipo IS NULL
+         OR cancelamento_tipo = ANY (ARRAY['user'::text, 'payment'::text,
+                                           'reactivated'::text, 'contrato'::text]));
+
+-- O reservar_refeicao so reativava linhas em 'user'. Sem isto, um aluno que
+-- perdeu o contrato era recebido com RES01 "ja tens uma reserva" ao tentar
+-- marcar o almoco que agora tem de marcar sozinho - um bloqueio, nao uma
+-- feature. So muda o WHERE do ON CONFLICT; o resto e o da 001.
+CREATE OR REPLACE FUNCTION public.reservar_refeicao(p_menu_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  m record;
+  v_estado text;
+BEGIN
+  SELECT id, data, tipo, preco INTO m FROM menus WHERE id = p_menu_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Menu inexistente' USING ERRCODE = 'RES03';
+  END IF;
+
+  INSERT INTO reservas (aluno_id, menu_id, data, tipo, preco, is_dieta, automatico, cancelamento_tipo)
+  VALUES (auth.uid(), m.id, m.data, m.tipo, m.preco, false, false, NULL)
+  ON CONFLICT (aluno_id, data, tipo) DO UPDATE
+    SET cancelamento_tipo = 'reactivated',
+        menu_id           = EXCLUDED.menu_id,
+        preco             = EXCLUDED.preco
+    WHERE reservas.cancelamento_tipo IN ('user', 'contrato');
+
+  -- FOUND fica falso quando houve conflito e o WHERE acima nao deixou reativar,
+  -- ou seja: existe uma linha e nao esta em 'user' nem em 'contrato'. Descobrir
+  -- em que estado esta para dizer ao aluno o que se passa.
+  IF NOT FOUND THEN
+    SELECT r.cancelamento_tipo INTO v_estado
+    FROM reservas r
+    WHERE r.aluno_id = auth.uid() AND r.data = m.data AND r.tipo = m.tipo;
+
+    IF v_estado = 'payment' THEN
+      RAISE EXCEPTION 'Esta refeicao ja foi liquidada e nao pode ser reservada de novo'
+        USING ERRCODE = 'RES02';
+    ELSE
+      RAISE EXCEPTION 'Ja tens uma reserva para esta refeicao neste dia'
+        USING ERRCODE = 'RES01';
+    END IF;
+  END IF;
+END; $function$;
+
+COMMIT;
+
+-- =============================================================================
+-- SECCAO 6 - definir_contrato_aluno
+-- =============================================================================
+BEGIN;
+
+-- A cantina muda o tipo de um aluno por aqui, e so por aqui: a coluna nao e
+-- escrivel por PostgREST por ninguem (seccao 2). SECURITY DEFINER com a
+-- verificacao de staff, como a liquidar_mes_divida e a saldos_por_aluno.
+--
+-- true -> false: cancela (nao apaga, nao reprecifica) os almocos AUTOMATICOS,
+-- ATIVOS e FUTUROS do aluno. Deixados como estavam, cobravam-lhe ate uma
+-- semana de almocos ao preco de um contrato que ja nao tem - e como os menus
+-- se publicam uma semana antes, essa semana e o caso normal e nao a excecao.
+--
+-- Estritamente futuros: data > hoje em Lisboa. O almoco de HOJE nunca e
+-- cancelado, mesmo antes das 9h. A regra das 9h da 002 e sobre um aluno que
+-- ainda nao teve oportunidade de comer; isto e sobre uma mudanca de contrato
+-- que nao deve perturbar uma refeicao que esta a ser servida. Os passados nao
+-- se tocam pela mesma razao, mais a regra 6.
+--
+-- false -> true: nao cria nada retroativamente. O proximo menu publicado
+-- apanha o aluno pelo trigger. Foi a opcao mais estreita das duas oferecidas.
+--
+-- Devolve quantos almocos cancelou, para o ecra o dizer antes e depois.
+CREATE OR REPLACE FUNCTION public.definir_contrato_aluno(p_aluno_id uuid, p_tem_contrato boolean)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  v_hoje       date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  v_cancelados integer := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina c WHERE c.id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode alterar o contrato de um aluno';
+  END IF;
+
+  UPDATE alunos a SET tem_contrato = p_tem_contrato WHERE a.id = p_aluno_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Aluno inexistente' USING ERRCODE = 'RES08';
+  END IF;
+
+  IF NOT p_tem_contrato THEN
+    UPDATE reservas r
+    SET cancelamento_tipo = 'contrato'
+    WHERE r.aluno_id   = p_aluno_id
+      AND r.tipo       = 'almoco'
+      AND r.automatico
+      AND r.ativa
+      AND r.data       > v_hoje;
+    GET DIAGNOSTICS v_cancelados = ROW_COUNT;
+  END IF;
+
+  RETURN v_cancelados;
+END; $fn$;
+
+REVOKE EXECUTE ON FUNCTION public.definir_contrato_aluno(uuid, boolean) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.definir_contrato_aluno(uuid, boolean) TO authenticated;
+
+-- Para o ecra dizer "vai cancelar N almocos" ANTES de confirmar. So conta.
+CREATE OR REPLACE FUNCTION public.contar_almocos_automaticos_futuros(p_aluno_id uuid)
+RETURNS integer LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE AS $fn$
+  SELECT count(*)::int FROM reservas r
+  WHERE r.aluno_id = p_aluno_id AND r.tipo = 'almoco' AND r.automatico AND r.ativa
+    AND r.data > (now() AT TIME ZONE 'Europe/Lisbon')::date
+    AND EXISTS (SELECT 1 FROM cantina c WHERE c.id = auth.uid());
+$fn$;
+
+REVOKE EXECUTE ON FUNCTION public.contar_almocos_automaticos_futuros(uuid) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.contar_almocos_automaticos_futuros(uuid) TO authenticated;
+
+COMMIT;
+
+-- =============================================================================
+-- VERIFICACAO
+-- =============================================================================
+-- 1) Todos os alunos existentes com contrato, e a configuracao com uma linha:
+--
+--   SELECT count(*) FILTER (WHERE tem_contrato) AS com, count(*) AS total FROM alunos;
+--   SELECT * FROM configuracao;
+--   Esperado: com = total; uma linha, preco > 0.
+--
+-- 2) A LISTA FINAL DE COLUNAS ESCREVIVEIS EM alunos (partilhada com a 009):
+--
+--   SELECT column_name FROM information_schema.column_privileges
+--   WHERE table_name = 'alunos' AND grantee = 'authenticated'
+--     AND privilege_type = 'UPDATE' ORDER BY 1;
+--   Esperado: exatamente email e nome. Nem tem_contrato, nem codigo.
+--
+-- 3) As funcoes novas sao SECURITY DEFINER e o anon nao lhes chega:
+--
+--   SELECT proname, prosecdef, proacl FROM pg_proc
+--   WHERE pronamespace = 'public'::regnamespace
+--     AND proname IN ('definir_contrato_aluno', 'contar_almocos_automaticos_futuros');
+--   Esperado: prosecdef = t, sem `anon=` e sem `=X/postgres`.
+--
+-- 4) O preco continua imutavel (correr numa transacao e fazer ROLLBACK):
+--
+--   BEGIN; UPDATE reservas SET preco = 99.99 WHERE id = (SELECT id FROM reservas LIMIT 1);
+--   SELECT preco FROM reservas WHERE id = (SELECT id FROM reservas LIMIT 1); ROLLBACK;
+--   Esperado: o preco original, nao 99.99.
+--
+-- 5) A conta dos saldos nao mudou para ninguem com contrato: correr como a
+--    cantina, antes e depois de aplicar isto, e comparar:
+--
+--   SELECT count(*), sum(total) FROM saldos_por_aluno();
+--   Esperado: identico. Esta migracao nao muda nenhum valor ja cobrado.
+-- =============================================================================
