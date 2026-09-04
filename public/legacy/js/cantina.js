@@ -2033,7 +2033,15 @@ async function exportarLeiturasExcel(){
 
 let _alunosContrato = [];
 let _alunosContratoFiltrados = [];
-let _filtroContrato = "todos";   // 'todos' | 'com' | 'sem' - combinado com a pesquisa por nome
+let _filtroContrato = "todos";   // 'todos' | 'completo' | 'parcial' | 'sem' - combinado com a pesquisa por nome
+
+// Os tres tipos de contrato (010). O parcial tem o preco do contrato mas nao
+// tem almoco automatico - marca-o o proprio aluno.
+const _TIPOS_CONTRATO = {
+  completo: { rotulo: "Contrato completo", cor: "#2e7d32", icone: "✅" },
+  parcial:  { rotulo: "Contrato parcial",  cor: "#1565c0", icone: "🔶" },
+  sem:      { rotulo: "Sem contrato",      cor: "#c62828", icone: "🏷️" }
+};
 
 // Um ecrã próprio e não um botão na lista do Histórico: aquela lista é um
 // seletor, e pôr um controlo que muda o que um aluno paga ao lado de "abrir o
@@ -2055,7 +2063,7 @@ async function showCantinaAlunos(){
   // das 1000 linhas.
   const { data, error } = await supabaseClient
     .from("alunos")
-    .select("id, nome, tem_contrato")
+    .select("id, nome, tipo_contrato")
     .order("nome");
 
   if (error) {
@@ -2072,7 +2080,7 @@ function filtrarAlunosContrato(){
   const termo = document.getElementById("pesquisaAlunosContrato").value.toLowerCase().trim();
   _alunosContratoFiltrados = _alunosContrato.filter(a =>
     (!termo || a.nome.toLowerCase().includes(termo)) &&
-    (_filtroContrato === "todos" || (_filtroContrato === "com") === !!a.tem_contrato)
+    (_filtroContrato === "todos" || a.tipo_contrato === _filtroContrato)
   );
   _renderAlunosContrato();
 }
@@ -2087,67 +2095,72 @@ function _filtrarContrato(filtro){
 function _renderAlunosContrato(){
   const div = document.getElementById("listaAlunosContrato");
   const total = _alunosContrato.length;
-  const sem = _alunosContrato.filter(a => !a.tem_contrato).length;
+  const parciais = _alunosContrato.filter(a => a.tipo_contrato === "parcial").length;
+  const sem      = _alunosContrato.filter(a => a.tipo_contrato === "sem").length;
   document.getElementById("alunosContratoContagem").textContent =
-    `👥 ${total} aluno${total !== 1 ? "s" : ""} · ${sem} sem contrato`;
+    `👥 ${total} aluno${total !== 1 ? "s" : ""} · ${parciais} parcia${parciais === 1 ? "l" : "is"} · ${sem} sem contrato`;
 
   if(!_alunosContratoFiltrados.length){
     div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>🔍</div>Nenhum aluno encontrado.</div>";
     return;
   }
 
-  div.innerHTML = _alunosContratoFiltrados.map(a => `
+  div.innerHTML = _alunosContratoFiltrados.map(a => {
+    const t = _TIPOS_CONTRATO[a.tipo_contrato] || _TIPOS_CONTRATO.completo;
+    const chip = (tipo, texto) => `
+      <button class="filtro-chip ${a.tipo_contrato === tipo ? "ativo" : ""}"
+              onclick="_definirTipoContrato('${a.id}', '${tipo}')">${texto}</button>`;
+    return `
     <div class="aluno-contrato-linha"
          style="display:flex;align-items:center;justify-content:space-between;gap:10px;
-                padding:10px 8px;border-bottom:1px solid #eee;">
+                padding:10px 8px;border-bottom:1px solid #eee;flex-wrap:wrap;">
       <div>
         <div style="font-weight:600;">${escapeHtml(a.nome)}</div>
-        <div style="font-size:13px;color:${a.tem_contrato ? "#2e7d32" : "#c62828"};">
-          ${a.tem_contrato ? "✅ Com contrato" : "🏷️ Sem contrato"}
-        </div>
+        <div style="font-size:13px;color:${t.cor};">${t.icone} ${t.rotulo}</div>
       </div>
-      <button class="btn-medium ${a.tem_contrato ? "btn-outline" : ""}"
-              onclick="_alternarContrato('${a.id}', ${a.tem_contrato})">
-        ${a.tem_contrato ? "Retirar contrato" : "Dar contrato"}
-      </button>
-    </div>
-  `).join("");
+      <div style="display:flex;gap:4px;">${chip("completo", "Completo")}${chip("parcial", "Parcial")}${chip("sem", "Sem")}</div>
+    </div>`;
+  }).join("");
 }
 
-// A confirmação diz QUANTOS almoços vão ser cancelados. É uma mudança do que o
-// aluno é cobrado e não é obviamente reversível para quem clica.
-async function _alternarContrato(alunoId, temContratoAtual){
+// A confirmação aparece só quando a mudança CANCELA almoços - de completo para
+// qualquer dos outros, havendo almoços automáticos futuros. Diz quantos e para
+// que tipo. Mudanças que não cancelam nada não têm nada para avisar.
+async function _definirTipoContrato(alunoId, novoTipo){
   const aluno = _alunosContrato.find(a => a.id === alunoId);
-  const nome = aluno ? aluno.nome : "este aluno";
+  if(!aluno || aluno.tipo_contrato === novoTipo) return;
+  const nome = aluno.nome;
+  const destino = _TIPOS_CONTRATO[novoTipo].rotulo;
 
-  if(temContratoAtual){
+  if(aluno.tipo_contrato === "completo"){
     const { data: n } = await supabaseClient
       .rpc("contar_almocos_automaticos_futuros", { p_aluno_id: alunoId });
     const quantos = Number(n) || 0;
-    const ok = await showModal({
-      icon: "🏷️",
-      title: "Retirar o contrato?",
-      message: `<b>${escapeHtml(nome)}</b> deixa de ter almoço automático e passa a pagar o preço sem contrato.<br><br>`
-             + `Vão ser cancelados <b>${quantos} almoço${quantos !== 1 ? "s" : ""}</b> já marcado${quantos !== 1 ? "s" : ""} para os próximos dias. `
-             + `O de hoje e os passados não mudam. O aluno pode voltar a marcá-los.`,
-      type: "warning",
-      buttons: [
-        { text: "Cancelar", type: "secondary", resolve: false },
-        { text: "Retirar contrato", type: "danger", resolve: true }
-      ]
-    });
-    if(!ok) return;
+    if(quantos > 0){
+      const ok = await showModal({
+        icon: "🏷️",
+        title: `Mudar para ${destino}?`,
+        message: `<b>${escapeHtml(nome)}</b> deixa de ter almoço automático`
+               + (novoTipo === "sem" ? ` e passa a pagar o preço sem contrato.` : `; o almoço passa a ser marcado pelo aluno, ao preço do menu.`)
+               + `<br><br>Vão ser cancelados <b>${quantos} almoço${quantos !== 1 ? "s" : ""}</b> já marcado${quantos !== 1 ? "s" : ""} para os próximos dias. `
+               + `O de hoje e os passados não mudam. O aluno pode voltar a marcá-los.`,
+        type: "warning",
+        buttons: [
+          { text: "Cancelar", type: "secondary", resolve: false },
+          { text: `Mudar para ${destino}`, type: "danger", resolve: true }
+        ]
+      });
+      if(!ok) return;
+    }
   }
 
   const { error } = await supabaseClient
-    .rpc("definir_contrato_aluno", { p_aluno_id: alunoId, p_tem_contrato: !temContratoAtual });
-
+    .rpc("definir_tipo_contrato", { p_aluno_id: alunoId, p_tipo: novoTipo });
   if(error){
     mostrarErro("Erro", "Não foi possível alterar o contrato: " + error.message);
     return;
   }
-
-  if(aluno) aluno.tem_contrato = !temContratoAtual;
+  aluno.tipo_contrato = novoTipo;
   filtrarAlunosContrato();
 }
 

@@ -202,9 +202,10 @@
     <input type="text" id="pesquisaAlunosContrato" placeholder="🔍 Pesquisar por nome..."
            oninput="filtrarAlunosContrato()">
     <div id="filtroContratoChips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-      <button class="filtro-chip ativo" data-filtro="todos" onclick="_filtrarContrato('todos')">Todos</button>
-      <button class="filtro-chip"       data-filtro="com"   onclick="_filtrarContrato('com')">Com contrato</button>
-      <button class="filtro-chip"       data-filtro="sem"   onclick="_filtrarContrato('sem')">Sem contrato</button>
+      <button class="filtro-chip ativo" data-filtro="todos"    onclick="_filtrarContrato('todos')">Todos</button>
+      <button class="filtro-chip"       data-filtro="completo" onclick="_filtrarContrato('completo')">Completo</button>
+      <button class="filtro-chip"       data-filtro="parcial"  onclick="_filtrarContrato('parcial')">Parcial</button>
+      <button class="filtro-chip"       data-filtro="sem"      onclick="_filtrarContrato('sem')">Sem contrato</button>
     </div>
     <span id="alunosContratoContagem"></span>
   </div>
