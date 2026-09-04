@@ -7,8 +7,10 @@
 
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
-let _reservasAtivasMenu = {};      // menu_id -> true (já reservado pelo aluno)
-let _reservasCanceladasMenu = {};  // menu_id -> true (cancelado por si; permite "Voltar a Reservar")
+let _reservasAtivasMenu = {};      // menu_id -> { automatico } (já reservado pelo aluno)
+let _reservasCanceladasMenu = {};  // menu_id -> true (cancelado por si ou pela cantina; permite "Voltar a Reservar")
+let _alunoTemContrato = true;         // lido em showAlunoMenu; true é o comportamento de sempre (008)
+let _precoAlmocoSemContrato = null;   // configuracao.preco_almoco_sem_contrato (008)
 let _mesMenuView = null;           // primeiro dia do mês em visualização
 let _diaMenuSelecionado = null;    // data ISO do dia selecionado
 
@@ -37,18 +39,31 @@ async function showAlunoMenu() {
 
     const { data: reservas } = await supabaseClient
       .from("reservas")
-      .select("menu_id, ativa, cancelamento_tipo")
+      .select("menu_id, ativa, cancelamento_tipo, automatico")
       .eq("aluno_id", aluno.id);
 
-    // Ativas → "Já reservado". Canceladas por si → botão "Voltar a Reservar",
-    // para o aluno reconhecer que está a desfazer um cancelamento, não a marcar
-    // uma refeição nova. As duas coisas passam pela mesma RPC reservar_refeicao.
+    // Ativas → "Já reservado", guardando se foi automática para o cartão dizer
+    // a verdade. Canceladas por si OU pela mudança de contrato → botão "Voltar
+    // a Reservar": nas duas o aluno está a desfazer um cancelamento, e a RPC
+    // reservar_refeicao reativa ambas.
     _reservasAtivasMenu = {};
     _reservasCanceladasMenu = {};
     reservas?.forEach(r => {
-      if(r.ativa) _reservasAtivasMenu[r.menu_id] = true;
-      else if(r.cancelamento_tipo === "user") _reservasCanceladasMenu[r.menu_id] = true;
+      if(r.ativa) _reservasAtivasMenu[r.menu_id] = { automatico: !!r.automatico };
+      else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = true;
     });
+
+    // O tipo de aluno e o preço do almoço sem contrato (008). O aluno lê a sua
+    // própria linha e a configuração; se qualquer das duas falhar fica-se com
+    // o comportamento de sempre (contrato, preço do menu), que é o caso de
+    // todos os alunos até a cantina dizer o contrário.
+    const { data: eu } = await supabaseClient
+      .from("alunos").select("tem_contrato").eq("id", aluno.id).single();
+    _alunoTemContrato = eu ? eu.tem_contrato !== false : true;
+
+    const { data: cfg } = await supabaseClient
+      .from("configuracao").select("preco_almoco_sem_contrato").single();
+    _precoAlmocoSemContrato = cfg ? Number(cfg.preco_almoco_sem_contrato) : null;
 
     // Mês inicial: o do primeiro menu disponível, senão o atual
     if(!_mesMenuView){
@@ -221,6 +236,13 @@ function _cartoesReservaDia(iso){
   const menusDia = _menusAluno.filter(m => m.data === iso);
   if(!menusDia.length) return `<i>Sem menus neste dia.</i>`;
 
+  // O preço que ESTE aluno paga: o do menu, salvo o almoço de quem não tem
+  // contrato, que é o da configuração. É o mesmo critério do reservas_guard.
+  const precoPara = m =>
+    (m.tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
+      ? _precoAlmocoSemContrato
+      : m.preco;
+
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   menusDia.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
 
@@ -229,12 +251,15 @@ function _cartoesReservaDia(iso){
     // automaticamente pela cantina, mas pode ter sido cancelado, e nesse caso
     // esta página tem de o mostrar como reservável — não afirmar que está reservado.
     if(_reservasAtivasMenu[m.id]){
+      // A nota do automático lê o que está na base de dados (reservas.automatico)
+      // e não o tipo de refeição: um almoço marcado pelo próprio aluno não é
+      // automático, e dizer que é era o último resto do D10.
       return `
         <div class="menu">
           ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-          ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(m.preco)})
+          ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})
           <br><span style="color:#2e7d32;font-size:13px;">✅ Já reservado</span>
-          ${m.tipo === "almoco" ? `
+          ${_reservasAtivasMenu[m.id].automatico ? `
             <br><span style="color:#666;font-size:12px;">O almoço é reservado automaticamente pela cantina.</span>
           ` : ""}
         </div>
@@ -250,7 +275,7 @@ function _cartoesReservaDia(iso){
     return `
       <div class="menu">
         ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-        ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(m.preco)})${mensagemHorario}
+        ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})${mensagemHorario}
         <br>
         ${podeReservar ? `
           <button onclick="reservarAluno('${m.id}', '${m.data}', '${m.tipo}')">
@@ -441,7 +466,7 @@ function _badgeRefeicao(r){
   // Reserva cancelada: cinzento e riscado, para se distinguir de uma ativa.
   // Teste explícito (não !_reservaAtiva) para a legenda, cujos objetos não têm
   // cancelamento_tipo, não aparecer riscada.
-  if(r && (r.cancelamento_tipo === "user" || r.cancelamento_tipo === "payment")){
+  if(r && (r.cancelamento_tipo === "user" || r.cancelamento_tipo === "payment" || r.cancelamento_tipo === "contrato")){
     return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:#f0f0f0;color:#999;text-decoration:line-through;margin:1px;">${m.txt}</span>`;
   }
   return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:${m.bg};color:${m.cor};margin:1px;">${m.txt}</span>`;
@@ -620,6 +645,10 @@ function _cartaoReserva(r, ctx){
   let statusBg = "#f8f9fa", statusBorda = "#007bff", statusTexto = "✅ Ativa", statusCor = "#28a745";
   if(r.cancelamento_tipo === "user"){
     statusBg = "#f8d7da"; statusBorda = "#dc3545"; statusTexto = "❌ Cancelada por si"; statusCor = "#dc3545";
+  } else if(r.cancelamento_tipo === "contrato"){
+    // Cancelada pela cantina ao retirar o contrato (008). Não é do aluno, por
+    // isso não conta para o limite de cancelamentos - ver _contextoReservas.
+    statusBg = "#fff3cd"; statusBorda = "#856404"; statusTexto = "🏷️ Cancelada pela cantina (mudança de contrato)"; statusCor = "#856404";
   } else if(r.cancelamento_tipo === "payment"){
     statusBg = "#e7d4f5"; statusBorda = "#6f42c1"; statusTexto = "💳 Paga (liquidação do mês)"; statusCor = "#6f42c1";
   } else if(r.cancelamento_tipo === "reactivated"){
@@ -656,7 +685,7 @@ function _cartaoReserva(r, ctx){
           Cancelar Reserva
         </button>
       ` : ""}
-      ${r.cancelamento_tipo === "user" && dentroPrazo ? `
+      ${(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") && dentroPrazo ? `
         <button onclick="reativarReserva('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
           🔄 Reativar (marcar como ativa novamente)
         </button>
