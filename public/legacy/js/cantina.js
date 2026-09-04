@@ -960,6 +960,7 @@ function selecionarDiaHistorico(iso){
 function _estadoReserva(r){
   switch(r.cancelamento_tipo){
     case "user":        return { texto: "❌ Cancelada pelo aluno", classe: "status-cancelada" };
+    case "contrato":    return { texto: "🏷️ Cancelada pela cantina (mudança de contrato)", classe: "status-cancelada" };
     case "payment":     return { texto: "💳 Paga",                 classe: "status-cancelada" };
     case "reactivated": return { texto: "🔄 Reativada",            classe: "status-ativa" };
     default:            return { texto: "✅ Ativa",                classe: "status-ativa" };
@@ -2013,4 +2014,136 @@ async function exportarLeiturasExcel(){
   const nomeFicheiro = `leituras_${dia}.xlsx`;
   XLSX.writeFile(wb, nomeFicheiro);
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
+}
+
+/* ==============================
+   CANTINA — ALUNOS (CONTRATOS)
+============================== */
+
+let _alunosContrato = [];
+let _alunosContratoFiltrados = [];
+
+// Um ecrã próprio e não um botão na lista do Histórico: aquela lista é um
+// seletor, e pôr um controlo que muda o que um aluno paga ao lado de "abrir o
+// histórico deste aluno" é a receita para um clique errado no sítio errado.
+async function showCantinaAlunos(){
+  show("cantinaAlunos");
+  const div = document.getElementById("listaAlunosContrato");
+  div.innerHTML = "⏳ A carregar alunos...";
+
+  const { data: cfg } = await supabaseClient
+    .from("configuracao").select("preco_almoco_sem_contrato").single();
+  document.getElementById("precoSemContrato").value =
+    cfg ? Number(cfg.preco_almoco_sem_contrato).toFixed(2) : "";
+
+  // Cresce com os alunos, não com as refeições - nunca chega perto do corte
+  // das 1000 linhas.
+  const { data, error } = await supabaseClient
+    .from("alunos")
+    .select("id, nome, tem_contrato")
+    .order("nome");
+
+  if (error) {
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
+    return;
+  }
+
+  _alunosContrato = data || [];
+  _alunosContratoFiltrados = [..._alunosContrato];
+  document.getElementById("pesquisaAlunosContrato").value = "";
+  _renderAlunosContrato();
+}
+
+function filtrarAlunosContrato(){
+  const termo = document.getElementById("pesquisaAlunosContrato").value.toLowerCase().trim();
+  _alunosContratoFiltrados = termo
+    ? _alunosContrato.filter(a => a.nome.toLowerCase().includes(termo))
+    : [..._alunosContrato];
+  _renderAlunosContrato();
+}
+
+function _renderAlunosContrato(){
+  const div = document.getElementById("listaAlunosContrato");
+  const total = _alunosContrato.length;
+  const sem = _alunosContrato.filter(a => !a.tem_contrato).length;
+  document.getElementById("alunosContratoContagem").textContent =
+    `👥 ${total} aluno${total !== 1 ? "s" : ""} · ${sem} sem contrato`;
+
+  if(!_alunosContratoFiltrados.length){
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>🔍</div>Nenhum aluno encontrado.</div>";
+    return;
+  }
+
+  div.innerHTML = _alunosContratoFiltrados.map(a => `
+    <div class="aluno-contrato-linha"
+         style="display:flex;align-items:center;justify-content:space-between;gap:10px;
+                padding:10px 8px;border-bottom:1px solid #eee;">
+      <div>
+        <div style="font-weight:600;">${escapeHtml(a.nome)}</div>
+        <div style="font-size:13px;color:${a.tem_contrato ? "#2e7d32" : "#c62828"};">
+          ${a.tem_contrato ? "✅ Com contrato" : "🏷️ Sem contrato"}
+        </div>
+      </div>
+      <button class="btn-medium"
+              onclick="_alternarContrato('${a.id}', ${a.tem_contrato})">
+        ${a.tem_contrato ? "Retirar contrato" : "Dar contrato"}
+      </button>
+    </div>
+  `).join("");
+}
+
+// A confirmação diz QUANTOS almoços vão ser cancelados. É uma mudança do que o
+// aluno é cobrado e não é obviamente reversível para quem clica.
+async function _alternarContrato(alunoId, temContratoAtual){
+  const aluno = _alunosContrato.find(a => a.id === alunoId);
+  const nome = aluno ? aluno.nome : "este aluno";
+
+  if(temContratoAtual){
+    const { data: n } = await supabaseClient
+      .rpc("contar_almocos_automaticos_futuros", { p_aluno_id: alunoId });
+    const quantos = Number(n) || 0;
+    const ok = await showModal({
+      icon: "🏷️",
+      title: "Retirar o contrato?",
+      message: `<b>${escapeHtml(nome)}</b> deixa de ter almoço automático e passa a pagar o preço sem contrato.<br><br>`
+             + `Vão ser cancelados <b>${quantos} almoço${quantos !== 1 ? "s" : ""}</b> já marcado${quantos !== 1 ? "s" : ""} para os próximos dias. `
+             + `O de hoje e os passados não mudam. O aluno pode voltar a marcá-los.`,
+      type: "warning",
+      buttons: [
+        { text: "Cancelar", type: "secondary", resolve: false },
+        { text: "Retirar contrato", type: "danger", resolve: true }
+      ]
+    });
+    if(!ok) return;
+  }
+
+  const { error } = await supabaseClient
+    .rpc("definir_contrato_aluno", { p_aluno_id: alunoId, p_tem_contrato: !temContratoAtual });
+
+  if(error){
+    mostrarErro("Erro", "Não foi possível alterar o contrato: " + error.message);
+    return;
+  }
+
+  if(aluno) aluno.tem_contrato = !temContratoAtual;
+  _renderAlunosContrato();
+}
+
+async function guardarPrecoSemContrato(){
+  const valor = Number(String(document.getElementById("precoSemContrato").value).replace(",", "."));
+  if(!(valor > 0)){
+    mostrarErro("Valor inválido", "Indica um preço maior do que zero.");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("configuracao")
+    .update({ preco_almoco_sem_contrato: valor })
+    .eq("id", true);
+
+  if(error){
+    mostrarErro("Erro", "Não foi possível guardar o preço: " + error.message);
+    return;
+  }
+  mostrarSucesso("Preço guardado", `Almoço sem contrato: ${formatCurrency(valor)}`, 1800);
 }
