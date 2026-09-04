@@ -597,6 +597,7 @@ async function menu(){
     elements.alunoButtons.innerHTML = `
       <button class="btn-full" onclick="showAlunoMenu()">Reservar Refeição</button>
       <button class="btn-full" onclick="showAlunoReservas()">Minhas Reservas</button>
+      <button class="btn-full" onclick="showNotificacoes()">🔔 Notificações</button>
     `;
     await saldo();
     await carregarNotificacoesInline(); // Mostrar notificações diretamente na página inicial
