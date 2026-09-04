@@ -1894,6 +1894,9 @@ function _renderLeitor(){
       Leituras nesta sessão: <b id="leitorContagem">${_leitorHistorico.length}</b>
     </div>
     <div id="leitorHistorico" style="margin-top:8px;"></div>
+
+    <button class="btn-medium" style="margin-top:14px;"
+            onclick="exportarLeiturasExcel()">🖨️ Exportar leituras de hoje</button>
   `;
 
   const input = document.getElementById("leitorInput");
@@ -1959,4 +1962,51 @@ async function _leitorProcessar(codigo){
     .join("");
 
   document.getElementById("leitorInput").focus();
+}
+
+// FILTRADO POR DIA, DE PROPÓSITO. Uma consulta sem limites sobre um registo que
+// só cresce é exatamente o defeito das 1000 linhas do PostgREST, já encontrado
+// três vezes nesta aplicação — e um registo de leituras cresce mais depressa do
+// que as reservas cresceram. Um dia de leituras fica muito abaixo do corte.
+async function exportarLeiturasExcel(){
+  const dia = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabaseClient
+    .from("leituras")
+    .select("data, tipo, resultado, codigo_lido, criado_em, alunos(nome)")
+    .eq("data", dia)
+    .order("criado_em");
+
+  if(error){
+    mostrarErro("Erro", "Erro ao exportar leituras: " + error.message);
+    return;
+  }
+
+  if(!data || data.length === 0){
+    mostrarInfo("Sem Leituras", "Não há leituras registadas hoje.");
+    return;
+  }
+
+  const linhas = [["Data", "Hora", "Refeição", "Aluno", "Código lido", "Resultado"]];
+
+  data.forEach(l => {
+    const h = new Date(l.criado_em);
+    linhas.push([
+      l.data,
+      `${String(h.getHours()).padStart(2,"0")}:${String(h.getMinutes()).padStart(2,"0")}`,
+      formatarTipoRefeicao(l.tipo),
+      l.alunos ? l.alunos.nome : "(desconhecido)",
+      l.codigo_lido,
+      l.resultado
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(linhas);
+  ws['!cols'] = [{wch:12},{wch:8},{wch:16},{wch:25},{wch:14},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, ws, "Leituras");
+
+  const nomeFicheiro = `leituras_${dia}.xlsx`;
+  XLSX.writeFile(wb, nomeFicheiro);
+  mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
