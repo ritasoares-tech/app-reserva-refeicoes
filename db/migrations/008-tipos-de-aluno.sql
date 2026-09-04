@@ -118,3 +118,154 @@ REVOKE UPDATE ON public.alunos FROM authenticated;
 GRANT  UPDATE (nome, email) ON public.alunos TO authenticated;
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 3 - O preco, no unico sitio onde ja se decidia
+-- =============================================================================
+BEGIN;
+
+-- O reservas_guard (003, F6) ja escrevia NEW.preco := menus.preco em TODAS as
+-- insercoes, viessem de triggers, de RPCs, da cantina ou de SQL a mao. E o
+-- unico sitio onde o preco se decide, por isso e o unico sitio que aprende o
+-- que e um contrato. Tudo o que cria reservas herda isto de graca.
+--
+-- LEVANTA ERRO, NUNCA CAI NO menus.preco. Um fallback numa definicao em falta
+-- cobrava o preco com contrato a um aluno que deve mais, em silencio - a forma
+-- de defeito que este projeto ja encontrou tres vezes. Falhar alto no INSERT e
+-- estritamente melhor do que cobrar a menos numa fatura.
+--
+-- O ramo UPDATE NAO MUDA. E ele que congela o preco de uma reserva ja feita.
+CREATE OR REPLACE FUNCTION public.reservas_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  v_uid      uuid    := auth.uid();
+  v_sistema  boolean := v_uid IS NULL;   -- service_role, triggers, migracoes
+  v_staff    boolean := NOT (v_uid IS NULL)
+                        AND EXISTS (SELECT 1 FROM cantina WHERE id = v_uid);
+  m          record;
+  v_contrato boolean;
+  v_preco_sc numeric;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    -- F6: preco, tipo e data vem do menu. Nunca do cliente, para ninguem.
+    SELECT preco, tipo, data INTO m FROM menus WHERE id = NEW.menu_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Menu inexistente' USING ERRCODE = 'RES03';
+    END IF;
+    NEW.tipo := m.tipo;
+    NEW.data := m.data;
+
+    -- 008: o almoco de um aluno sem contrato tem o preco da configuracao.
+    IF m.tipo = 'almoco' THEN
+      SELECT a.tem_contrato INTO v_contrato FROM alunos a WHERE a.id = NEW.aluno_id;
+      IF NOT FOUND THEN
+        -- Inalcancavel enquanto aluno_id tiver FK para alunos. Rede, nao caso.
+        RAISE EXCEPTION 'Aluno inexistente' USING ERRCODE = 'RES08';
+      END IF;
+    END IF;
+
+    IF m.tipo = 'almoco' AND NOT v_contrato THEN
+      SELECT c.preco_almoco_sem_contrato INTO v_preco_sc FROM configuracao c;
+      IF v_preco_sc IS NULL THEN
+        RAISE EXCEPTION 'Preco do almoco sem contrato nao configurado'
+          USING ERRCODE = 'RES09';
+      END IF;
+      NEW.preco := v_preco_sc;
+    ELSE
+      NEW.preco := m.preco;
+    END IF;
+
+    IF NOT v_sistema AND NOT v_staff THEN
+      IF NEW.aluno_id <> v_uid THEN
+        RAISE EXCEPTION 'So podes reservar para ti' USING ERRCODE = 'RES05';
+      END IF;
+      IF now() >= public.prazo_limite(NEW.tipo, NEW.data) THEN
+        RAISE EXCEPTION 'Prazo ultrapassado para esta refeicao'
+          USING ERRCODE = 'RES06';
+      END IF;
+    END IF;
+
+  ELSE  -- UPDATE
+    -- Imutaveis depois de criada, para toda a gente. Uma reserva nao muda de
+    -- dono, de menu, de dia, de tipo nem de preco: se for preciso outra coisa,
+    -- cancela-se esta e cria-se outra.
+    NEW.aluno_id   := OLD.aluno_id;
+    NEW.menu_id    := OLD.menu_id;
+    NEW.data       := OLD.data;
+    NEW.tipo       := OLD.tipo;
+    NEW.preco      := OLD.preco;
+    NEW.criado_em  := OLD.criado_em;
+    NEW.automatico := OLD.automatico;
+
+    IF NOT v_sistema AND NOT v_staff THEN
+      IF NEW.cancelamento_tipo IS DISTINCT FROM OLD.cancelamento_tipo THEN
+        IF NEW.cancelamento_tipo = 'payment' THEN
+          RAISE EXCEPTION 'So a cantina pode liquidar reservas'
+            USING ERRCODE = 'RES07';
+        END IF;
+        IF now() >= public.prazo_limite(OLD.tipo, OLD.data) THEN
+          RAISE EXCEPTION 'Prazo ultrapassado para esta refeicao'
+            USING ERRCODE = 'RES06';
+        END IF;
+      END IF;
+
+      -- A dieta segue o prazo do almoco, como no Cluster 3 (F2).
+      IF NEW.is_dieta IS DISTINCT FROM OLD.is_dieta
+         AND now() >= public.prazo_limite(OLD.tipo, OLD.data) THEN
+        RAISE EXCEPTION 'Prazo ultrapassado para alterar a dieta'
+          USING ERRCODE = 'RES06';
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END; $function$;
+
+COMMIT;
+
+-- =============================================================================
+-- SECCAO 4 - O almoco automatico so para quem tem contrato
+-- =============================================================================
+BEGIN;
+
+-- Quando nasce um menu de almoco: so os alunos com contrato.
+CREATE OR REPLACE FUNCTION public.criar_reservas_automaticas_almoco()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+BEGIN
+  IF NEW.tipo = 'almoco' THEN
+    INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta)
+    SELECT a.id, NEW.id, NEW.tipo, NEW.data, NEW.preco, true, false
+    FROM alunos a
+    WHERE a.tem_contrato
+    ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+  END IF;
+  RETURN NEW;
+END; $function$;
+
+-- Quando nasce um aluno (002): so se tiver contrato. A regra do "hoje antes das
+-- 9h" e o fuso de Lisboa ficam exatamente como a 002 os escreveu.
+CREATE OR REPLACE FUNCTION public.criar_reservas_almoco_novo_aluno()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_local timestamp := now() AT TIME ZONE 'Europe/Lisbon';
+  v_hoje  date      := v_local::date;
+  v_hora  time      := v_local::time;
+BEGIN
+  IF NOT NEW.tem_contrato THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta)
+  SELECT NEW.id, m.id, m.tipo, m.data, m.preco, true, false
+  FROM menus m
+  WHERE m.tipo = 'almoco'
+    AND (
+          m.data > v_hoje                                  -- almocos futuros
+       OR (m.data = v_hoje AND v_hora < TIME '09:00')       -- hoje, so antes das 9h
+        )
+  ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+
+  RETURN NEW;
+END; $$;
+
+COMMIT;
