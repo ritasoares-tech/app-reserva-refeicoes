@@ -56,12 +56,19 @@ BEGIN
   RETURN v_codigo;
 END; $$;
 
+-- Ninguem da aplicacao chama isto: so o trigger abaixo e esta migracao. O
+-- EXECUTE por omissao ia para o PUBLIC, e e a licao da 004, 005 e 006.
+REVOKE EXECUTE ON FUNCTION public.gerar_codigo_aluno() FROM PUBLIC, anon, authenticated;
+
 -- Preencher os que ja existem. A funcao e volatil, por isso corre uma vez por
 -- linha, que e o que se quer.
 UPDATE public.alunos SET codigo = public.gerar_codigo_aluno() WHERE codigo IS NULL;
 
 ALTER TABLE public.alunos ALTER COLUMN codigo SET NOT NULL;
 ALTER TABLE public.alunos ADD CONSTRAINT alunos_codigo_key UNIQUE (codigo);
+-- O trigger so cobre o INSERT. Um UPDATE a mao no SQL Editor com um codigo mal
+-- formado passava sem isto, e a verificacao no fim so o DETETA; isto IMPEDE.
+ALTER TABLE public.alunos ADD CONSTRAINT alunos_codigo_formato_chk CHECK (codigo ~ '^[0-9]{6}$');
 
 -- Os alunos entram a mao pelo SQL Editor, sem interface nenhuma. Um trigger
 -- apanha todos os caminhos - e a mesma razao pela qual a 002 e um trigger.

@@ -1941,7 +1941,7 @@ async function _leitorProcessar(codigo){
     repetido:            { cor:"#f9a825", icone:"⚠️", texto:"JÁ TINHA SIDO SERVIDO" },
     codigo_desconhecido: { cor:"#c62828", icone:"❓", texto:"CÓDIGO DESCONHECIDO" }
   };
-  const e = cores[r.resultado] || { cor:"#666", icone:"❓", texto:r.resultado || "?" };
+  const e = cores[r.resultado] || { cor:"#666", icone:"❓", texto:escapeHtml(r.resultado || "?") };
 
   div.innerHTML = `
     <div style="background:${e.cor};color:#fff;padding:22px;border-radius:14px;text-align:center;">
@@ -1969,7 +1969,11 @@ async function _leitorProcessar(codigo){
 // três vezes nesta aplicação — e um registo de leituras cresce mais depressa do
 // que as reservas cresceram. Um dia de leituras fica muito abaixo do corte.
 async function exportarLeiturasExcel(){
-  const dia = new Date().toISOString().slice(0, 10);
+  // O dia de Lisboa, não o UTC: a coluna data das leituras é escrita pelo
+  // servidor como (now() AT TIME ZONE 'Europe/Lisbon')::date. Com o UTC, entre
+  // a meia-noite e a uma da manhã no verão o ficheiro saía do dia errado.
+  // (sv-SE formata como AAAA-MM-DD.)
+  const dia = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
 
   const { data, error } = await supabaseClient
     .from("leituras")
