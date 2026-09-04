@@ -419,6 +419,7 @@ async function showAlunoReservas(){
         data,
         tipo,
         preco,
+        automatico,
         cancelamento_tipo,
         is_dieta,
         menus!inner(prato, preco)
@@ -607,10 +608,19 @@ function renderMinhasReservas(){
 
 // Contexto necessário para decidir se uma reserva pode ser cancelada/dieta.
 // Os prazos não vivem aqui — vêm de _prazoLimite(), avaliado por cartão.
+//
+// O limite mensal é a exceção a uma OBRIGAÇÃO: o contrato completo obriga ao
+// almoço e deixa cancelar dois por mês. Só conta, portanto, o almoço que o
+// contrato marcou sozinho — reservas.automatico. Um almoço marcado à mão pelo
+// aluno nunca foi obrigado, e é o único que os contratos parcial e sem têm.
+//
+// Lê-se da LINHA, não do tipo de contrato de hoje: o automatico é congelado
+// pelo reservas_guard e continua a dizer o que dizia no dia em que o almoço
+// nasceu. É por isso que mudar de tipo a meio do mês não precisa de nada.
 function _contextoReservas(){
   const cancelamentosUsuarioMesAlmoco = {};
   _reservasAluno.forEach(r => {
-    if(r.tipo === "almoco" && r.cancelamento_tipo === "user"){
+    if(r.tipo === "almoco" && r.cancelamento_tipo === "user" && r.automatico){
       const d = new Date(r.data);
       const key = `${d.getFullYear()}-${d.getMonth()+1}`;
       cancelamentosUsuarioMesAlmoco[key] = (cancelamentosUsuarioMesAlmoco[key] || 0) + 1;
@@ -651,7 +661,11 @@ function _cartaoReserva(r, ctx){
       const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
       const reservasDia = (reservasPorMenu[r.data] && reservasPorMenu[r.data][r.tipo]) || [];
       const jaCancelou = reservasDia.filter(x=>x.cancelamento_tipo === "user").length;
-      if(jaCancelou < 1 && cancelamentosAtuais < 2) podeCancelar = true;
+      // Simétrico do _contextoReservas: o limite só BLOQUEIA o almoço obrigado.
+      // Um almoço marcado à mão cancela-se dentro do prazo, diga a conta do mês
+      // o que disser — é o caso do aluno que voltou a completo e marcou sozinho
+      // os almoços que o fan-out já não lhe deu.
+      if(jaCancelou < 1 && (!r.automatico || cancelamentosAtuais < 2)) podeCancelar = true;
       podeDieta = true;
     } else {
       podeCancelar = true;
