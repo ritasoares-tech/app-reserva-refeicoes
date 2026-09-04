@@ -44,34 +44,38 @@
 
 <!-- CRIAR MENU -->
 <div class="container hidden" id="cantinaMenu">
+  <button class="btn-back" onclick="menu()">Voltar</button>
   <h2>Criar Menu</h2>
   <div id="calendarioCriarMenu" style="width:100%;"></div>
-  <button class="btn-back" onclick="menu()">Voltar</button>
 </div>
 
 <!-- MENUS CRIADOS -->
 <div class="container hidden" id="cantinaMenus">
+  <button class="btn-back" onclick="menu()">Voltar</button>
   <h2>Menus Criados</h2>
   <div id="listaMenus"></div>
-  <button class="btn-back" onclick="menu()" style="margin-top:16px;">Voltar</button>
 </div>
 
 <!-- RESERVAS DO DIA -->
 <div class="container hidden" id="cantinaReservas">
+  <button class="btn-back" onclick="menu()">Voltar</button>
   <h2>Reservas do Dia</h2>
   <div id="reservasDia"></div>
-  <button class="btn-back" onclick="menu()">Voltar</button>
 </div>
 
 <!-- PEDIDOS DE CANCELAMENTO -->
 <div class="container hidden" id="cantinaPedidos">
+  <button class="btn-back" onclick="menu()">Voltar</button>
   <h2>Pedidos de Cancelamento</h2>
   <div id="listaPedidos"></div>
-  <button class="btn-back" onclick="menu()" style="margin-top:16px;">Voltar</button>
 </div>
 
 <!-- HISTÓRICO -->
 <div class="container hidden" id="cantinaHistorico">
+  <div class="botoes-historico" style="margin-top:0;margin-bottom:16px;">
+    <button class="btn-back" onclick="backToHistoricoList()" id="btnBackHistorico" style="display: none;">Voltar a Alunos</button>
+    <button class="btn-back" onclick="menu()" id="btnBackMenu">Voltar</button>
+  </div>
   <h2>Histórico de Aluno</h2>
   <h2 id="NomeAluno"></h2>
   <!-- Pesquisa e Filtros de Alunos (lista inicial) -->
@@ -98,14 +102,11 @@
    
   <div id="historico"></div>
   
-  <div class="botoes-historico">
-    <button class="btn-back" onclick="backToHistoricoList()" id="btnBackHistorico" style="display: none;">⬅️ Voltar a Alunos</button>
-    <button class="btn-back" onclick="menu()" id="btnBackMenu">Voltar</button>
-  </div>
 </div>
 
 <!-- SALDOS -->
 <div class="container hidden" id="cantinaSaldos">
+  <button class="btn-back" onclick="menu()">Voltar</button>
   <h2>Valores Pendentes</h2>
   
   <!-- Caixa de Pesquisa e Filtros -->
@@ -118,7 +119,11 @@
         onkeyup="filtrarSaldos()"
       />
     </div>
-    
+    <div style="margin-top:8px;display:flex;gap:6px;align-items:center;font-size:12px;color:#666;">
+      Ordenar:
+      <button class="filtro-chip ativo" id="ordNome"  onclick="ordenarSaldos('nome')">Nome</button>
+      <button class="filtro-chip"       id="ordValor" onclick="ordenarSaldos('valor')">Valor</button>
+    </div>
   </div>
 
   <!-- Caixa de Resultados -->
@@ -130,30 +135,29 @@
     <button class="btn-medium" onclick="exportarSaldosExcel()">📥 Exportar Valores em Dívida</button>
     <button class="btn-medium" onclick="abrirRelatorioMensal()">📊 Relatório Mensal</button>
   </div>
-  <button class="btn-back" onclick="menu()">Voltar</button>
 </div>
 
 <!-- DETALHE SALDO ALUNO -->
 <div class="container hidden" id="cantinaSaldoAluno">
+  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
   <h2 id="tituloAluno"></h2>
   <div class="card-divida">
-    <span>Liquidar o Total Pendente</span>
-    <strong id="valorTotal">€0.00</strong>
+    <span>Total pendente:</span>
+    <strong id="valorTotal" style="margin-left:12px;">0.00€</strong>
   </div>
   <div id="mesesDivida"></div>
   <button id="btnLiquidarTotal" class="btn-full danger hidden" onclick="liquidarDividaTotal(alunoAtual)">Liquidar o Total Pendente</button>
   <button class="btn-full" onclick="exportarHistoricoAluno()">📥 Exportar Histórico</button>
-  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
 </div>
 
 <!-- RELATÓRIO MENSAL -->
 <div class="container hidden" id="paginaRelatorio">
+  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
   <h2>Relatório Mensal</h2>
   <div class="filtros-relatorio">
     <select id="relatorioMes"></select>
   </div>
   <button class="btn-full" onclick="gerarRelatorioMensal()">Gerar Excel</button>
-  <button class="btn-back" onclick="showCantinaSaldos()">Voltar</button>
 </div>
 
 <!-- ALUNO - MENU -->
@@ -197,6 +201,11 @@
   <div class="alunos-pesquisa-box">
     <input type="text" id="pesquisaAlunosContrato" placeholder="🔍 Pesquisar por nome..."
            oninput="filtrarAlunosContrato()">
+    <div id="filtroContratoChips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="filtro-chip ativo" data-filtro="todos" onclick="_filtrarContrato('todos')">Todos</button>
+      <button class="filtro-chip"       data-filtro="com"   onclick="_filtrarContrato('com')">Com contrato</button>
+      <button class="filtro-chip"       data-filtro="sem"   onclick="_filtrarContrato('sem')">Sem contrato</button>
+    </div>
     <span id="alunosContratoContagem"></span>
   </div>
   <div id="listaAlunosContrato"></div>

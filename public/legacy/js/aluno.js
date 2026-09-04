@@ -5,6 +5,29 @@
 ============================== */
 /* formatarData vive agora no app.js, com o escapeHtml. */
 
+// O tipo de aluno e o preço do almoço sem contrato (008). O aluno lê a sua
+// própria linha e a configuração; se qualquer das duas falhar fica-se com o
+// comportamento de sempre (contrato, preço do menu), que é o caso de todos os
+// alunos até a cantina dizer o contrário. Usado pelos dois ecrãs que mostram
+// preços: Reservar Refeição e Minhas Reservas.
+async function _carregarTipoAluno(alunoId){
+  const { data: eu } = await supabaseClient
+    .from("alunos").select("tem_contrato").eq("id", alunoId).single();
+  _alunoTemContrato = eu ? eu.tem_contrato !== false : true;
+
+  const { data: cfg } = await supabaseClient
+    .from("configuracao").select("preco_almoco_sem_contrato").single();
+  _precoAlmocoSemContrato = cfg ? Number(cfg.preco_almoco_sem_contrato) : null;
+}
+
+// O preço de uma marcação NOVA desta refeição para este aluno - o critério do
+// reservas_guard: o do menu, salvo o almoço de quem não tem contrato.
+function _precoNovaMarcacao(tipo, precoMenu){
+  return (tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
+    ? _precoAlmocoSemContrato
+    : Number(precoMenu);
+}
+
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
 let _reservasAtivasMenu = {};      // menu_id -> { automatico } (já reservado pelo aluno)
@@ -53,17 +76,7 @@ async function showAlunoMenu() {
       else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = { preco: Number(r.preco), tipo: r.cancelamento_tipo };
     });
 
-    // O tipo de aluno e o preço do almoço sem contrato (008). O aluno lê a sua
-    // própria linha e a configuração; se qualquer das duas falhar fica-se com
-    // o comportamento de sempre (contrato, preço do menu), que é o caso de
-    // todos os alunos até a cantina dizer o contrário.
-    const { data: eu } = await supabaseClient
-      .from("alunos").select("tem_contrato").eq("id", aluno.id).single();
-    _alunoTemContrato = eu ? eu.tem_contrato !== false : true;
-
-    const { data: cfg } = await supabaseClient
-      .from("configuracao").select("preco_almoco_sem_contrato").single();
-    _precoAlmocoSemContrato = cfg ? Number(cfg.preco_almoco_sem_contrato) : null;
+    await _carregarTipoAluno(aluno.id);
 
     // Mês inicial: o do primeiro menu disponível, senão o atual
     if(!_mesMenuView){
@@ -168,9 +181,9 @@ function renderCalendarioMenu(){
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesMenu(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesMenu(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES[mes]} ${ano}</b>
-      <button onclick="mudarMesMenu(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesMenu(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -234,7 +247,7 @@ function _regraReserva(tipo, iso){
 // Cartões de reserva das refeições de um dia
 function _cartoesReservaDia(iso){
   const menusDia = _menusAluno.filter(m => m.data === iso);
-  if(!menusDia.length) return `<i>Sem menus neste dia.</i>`;
+  if(!menusDia.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem menus neste dia.</div>`;
 
   // O preço que ESTE aluno paga, pelo mesmo critério do reservas_guard:
   //  - uma reserva que o próprio cancelou e volta a marcar é reativada com o
@@ -242,10 +255,7 @@ function _cartoesReservaDia(iso){
   //  - uma reserva cancelada pela cantina ao retirar o contrato, e uma reserva
   //    nova, levam o preço de hoje: o do menu, salvo o almoço de quem não tem
   //    contrato, que é o da configuração.
-  const precoHoje = m =>
-    (m.tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
-      ? _precoAlmocoSemContrato
-      : m.preco;
+  const precoHoje = m => _precoNovaMarcacao(m.tipo, m.preco);
   const precoPara = m => {
     const c = _reservasCanceladasMenu[m.id];
     if(c && c.tipo === "user") return c.preco;
@@ -280,11 +290,15 @@ function _cartoesReservaDia(iso){
     const mensagemHorario = regra.mensagem;
     const foiCancelada = _reservasCanceladasMenu[m.id];
     const rotuloBotao = foiCancelada ? "Voltar a Reservar" : "Reservar";
+    const notaCancelada = !foiCancelada ? "" : foiCancelada.tipo === "contrato"
+      ? `<br><span style="color:#856404;font-size:12px;">🏷️ Cancelada pela cantina (mudança de contrato)</span>`
+      : `<br><span style="color:#c62828;font-size:12px;">❌ Cancelaste esta reserva</span>`;
 
     return `
       <div class="menu">
         ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
         ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})${mensagemHorario}
+        ${notaCancelada}
         <br>
         ${podeReservar ? `
           <button onclick="reservarAluno('${m.id}', '${m.data}', '${m.tipo}')">
@@ -407,7 +421,7 @@ async function showAlunoReservas(){
         preco,
         cancelamento_tipo,
         is_dieta,
-        menus!inner(prato)
+        menus!inner(prato, preco)
       `)
       .eq("aluno_id", aluno.id)
       .order("data", { ascending: true });
@@ -416,6 +430,8 @@ async function showAlunoReservas(){
       handleError(error, "Erro ao carregar reservas");
       return;
     }
+
+    await _carregarTipoAluno(aluno.id);
 
     _reservasAluno = reservas || [];
 
@@ -570,9 +586,9 @@ function renderMinhasReservas(){
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesReservas(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesReservas(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES[mes]} ${ano}</b>
-      <button onclick="mudarMesReservas(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesReservas(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -651,6 +667,16 @@ function _cartaoReserva(r, ctx){
   const pedido = pedidos.find(p => p.status === "pendente")
               || pedidos.find(p => p.status === "rejeitado");
 
+  // O preço no cartão. Uma reserva cancelada pela cantina ao retirar o contrato
+  // volta a marcar-se ao preço de HOJE (decisão de 2026-09-04) - é esse que se
+  // mostra, e não o congelado na linha, para o que se vê ser o que se cobra.
+  const precoCard = r.cancelamento_tipo === "contrato"
+    ? _precoNovaMarcacao(r.tipo, r.menus?.preco ?? r.preco)
+    : Number(r.preco);
+  const notaPreco = r.cancelamento_tipo === "contrato"
+    ? `<div style="color:#888; font-size:11px; margin-left:28px;">preço ao voltar a marcar</div>`
+    : "";
+
   let statusBg = "#f8f9fa", statusBorda = "#007bff", statusTexto = "✅ Ativa", statusCor = "#28a745";
   if(r.cancelamento_tipo === "user"){
     statusBg = "#f8d7da"; statusBorda = "#dc3545"; statusTexto = "❌ Cancelada por si"; statusCor = "#dc3545";
@@ -672,22 +698,21 @@ function _cartaoReserva(r, ctx){
             <span style="font-size:20px;">${emojiTipo(r.tipo, r.is_dieta)}</span>
             <span style="font-weight:bold; color:#333;">${r.tipo === "almoco" && r.is_dieta ? "Almoço (Dieta)" : formatarTipoRefeicao(r.tipo)}</span>
           </div>
-          <div style="color:#666; font-size:13px; margin-left:28px;">
-            ${r.menus?.prato ? escapeHtml(r.menus.prato) : "-"}
-            <span style="float:right; color:#007bff; font-weight:bold;">${formatCurrency(r.preco).replace("€", "")}€</span>
+          <div style="color:#666; font-size:13px; margin-left:28px; display:flex; justify-content:space-between; gap:8px;">
+            <span>${r.menus?.prato ? escapeHtml(r.menus.prato) : "-"}</span>
+            <span style="color:#007bff; font-weight:bold; white-space:nowrap;">${formatCurrency(precoCard)}</span>
           </div>
+          ${notaPreco}
           <div style="color:${statusCor}; font-size:12px; margin-top:4px; margin-left:28px;">${statusTexto}</div>
+          ${podeDieta ? `
+            <button onclick="trocarDieta('${r.id}', ${!r.is_dieta})"
+                    style="margin-top:8px; margin-left:28px; padding:6px 12px; font-size:12px; text-transform:none; letter-spacing:0; box-shadow:none;
+                           background:${r.is_dieta ? "#e2e3e5" : "#fff3cd"}; color:#333;
+                           border:1px solid ${r.is_dieta ? "#6c757d" : "#ffc107"}; border-radius:4px; cursor:pointer;">
+              ${r.is_dieta ? "🍽️ Mudar para Normal" : "🥗 Mudar para Dieta"}
+            </button>
+          ` : ""}
         </div>
-        ${podeDieta && !r.is_dieta ? `
-          <button onclick="trocarDieta('${r.id}', true)" style="padding:6px 10px; font-size:12px; background:#fff3cd; color:#333; border:1px solid #ffc107; border-radius:4px; cursor:pointer;">
-            🥗 Dieta
-          </button>
-        ` : ""}
-        ${podeDieta && r.is_dieta ? `
-          <button onclick="trocarDieta('${r.id}', false)" style="padding:6px 10px; font-size:12px; background:#e2e3e5; color:#333; border:1px solid #6c757d; border-radius:4px; cursor:pointer;">
-            🍽️ Normal
-          </button>
-        ` : ""}
       </div>
       ${podeCancelar ? `
         <button onclick="cancelarReserva('${r.id}', '${keyMes}')" style="margin-top:8px; width:100%; padding:8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
@@ -696,7 +721,7 @@ function _cartaoReserva(r, ctx){
       ` : ""}
       ${(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") && dentroPrazo ? `
         <button onclick="reativarReserva('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
-          🔄 Reativar (marcar como ativa novamente)
+          Voltar a Reservar
         </button>
       ` : ""}
       ${mostrarAvisoLimite ? `
@@ -1031,7 +1056,7 @@ async function showNotificacoes() {
     const container = document.getElementById("listaNotificacoes");
     
     if (!notificacoes || notificacoes.length === 0) {
-      container.innerHTML = '<p style="text-align:center;color:#888;">Nenhuma notificação</p>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔔</div>Nenhuma notificação</div>';
       hideLoading();
       return;
     }

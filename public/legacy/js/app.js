@@ -118,7 +118,8 @@ const addBack = id => {
   btn.className = "btn-back";
   btn.textContent = "Voltar";
   btn.onclick = menu;
-  container.appendChild(btn);
+  // No topo, como em todos os outros ecras (passagem de UI, 2026-09-04).
+  container.insertBefore(btn, container.firstChild);
 };
 
 const tipoEmoji = tipo => {
@@ -610,9 +611,9 @@ async function menu(){
       <button class="btn-full" onclick="showCriarMenu()">Criar Menus</button>
       <button class="btn-full" onclick="showMenusCriados()">Menus Criados</button>
       <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
-      <button class="btn-full" onclick="showLeitorCodigo()">📷 Leitor</button>
+      <button class="btn-full" onclick="showLeitorCodigo()">Leitor</button>
       <button class="btn-full" onclick="showCantinaHistorico()">Histórico de Aluno</button>
-      <button class="btn-full" onclick="showCantinaAlunos()">👥 Alunos</button>
+      <button class="btn-full" onclick="showCantinaAlunos()">Alunos</button>
       <button class="btn-full" onclick="showPedidosCancelamento()">Pedidos de Cancelamento</button>
       <button class="btn-full" onclick="showCantinaSaldos()">Valores Pendentes</button>
     `;
@@ -640,7 +641,7 @@ async function saldo(){
     }
 
     if(!reservas || reservas.length === 0){
-      elements.saldoAluno.innerHTML = "Sem valores em dívida.";
+      elements.saldoAluno.innerHTML = "<div class='empty-state compacto'><div class='empty-state-icon'>✅</div>Sem valores em dívida.</div>";
       return;
     }
 
@@ -697,15 +698,21 @@ async function saldo(){
     const keyMesAtual = `${anoAtual}-${mesAtual + 1}`;
     const valorMesAtual = porMes[keyMesAtual] || 0;
 
+    // Com um unico mes, e sendo o atual, a linha "Mes atual" repetia o total
+    // logo por baixo. So aparece quando ha mais do que um mes a somar.
+    const soMesAtual = mesesOrdenados.length === 1 && porMes[keyMesAtual] !== undefined;
+
     elements.saldoAluno.innerHTML = `
+      ${soMesAtual ? "" : `
       <div style="margin-bottom:6px;">
         <div style="font-size:12px;color:#888;">Mês atual</div>
         <b>${nomeMesAtual} - ${Number(valorMesAtual).toFixed(2)}€</b>
       </div>
-      <hr style="margin:8px 0;">
-      <div id="totalDividaToggle" onclick="toggleDetalheDivida()" style="cursor:pointer;">
-        <b>Total em Dívida:</b>
-        <span style="float:right">${Number(total).toFixed(2)}€ <span id="setaDivida">▾</span></span>
+      <hr style="margin:8px 0;">`}
+      <div id="totalDividaToggle" onclick="toggleDetalheDivida()"
+           style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <b>Total em dívida:</b>
+        <span>${Number(total).toFixed(2)}€ <span id="setaDivida">▾</span></span>
       </div>
       <div id="detalheDivida" class="hidden" style="margin-top:10px;padding-top:8px;border-top:1px dashed #ccc;font-size:15px;font-weight:500;">
         ${detalhe}

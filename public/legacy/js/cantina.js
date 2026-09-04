@@ -104,16 +104,22 @@ function renderCalendarioCriarMenu(){
     const isHoje = iso === hojeISO;
     const isSel = iso === _diaCriarSelecionado;
     const badges = menusDia.map(m => _badgeMenuCantina(m.tipo)).join("");
+    // Fim de semana sem menus: neutro, não vermelho. Oito a dez "falta criar"
+    // por mês em dias que a cantina não serve tiravam o significado ao vermelho.
+    const dow = new Date(ano, mes, dia).getDay();
+    const fimDeSemana = dow === 0 || dow === 6;
 
     let fundo = "transparent";
     if(isSel) fundo = "#fff3cd";
     else if(completo) fundo = "#e8f5e9";
     else if(temMenus) fundo = "#fffde7";
+    else if(!passado && fimDeSemana) fundo = "#f5f5f5";
     else if(!passado) fundo = "#ffebee";
 
     const borda = isSel ? "2px solid #ffc107"
                  : completo ? "1px solid #a5d6a7"
                  : temMenus ? "1px solid #ffe082"
+                 : (!passado && fimDeSemana) ? "1px solid #e0e0e0"
                  : (!passado ? "1px dashed #ef9a9a" : "1px solid transparent");
 
     const clicavel = !passado;
@@ -144,15 +150,16 @@ function renderCalendarioCriarMenu(){
         Toca num dia para criar os menus.<br>
         <span style="color:#c62828;">Vermelho</span> = falta criar &nbsp;·&nbsp;
         <span style="color:#f9a825;">Amarelo</span> = incompleto &nbsp;·&nbsp;
-        <span style="color:#2e7d32;">Verde</span> = completo
+        <span style="color:#2e7d32;">Verde</span> = completo &nbsp;·&nbsp;
+        <span style="color:#999;">Cinzento</span> = fim de semana
       </p>`;
   }
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesCriar(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesCriar(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesCriar(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesCriar(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -440,9 +447,9 @@ function renderCalendarioMenusCriados(){
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesMenus(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesMenus(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesMenus(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesMenus(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -456,7 +463,7 @@ function renderCalendarioMenusCriados(){
 
 function _cartoesMenusDia(iso){
   const menus = (window.todosOsMenus || []).filter(m => m.data === iso);
-  if(!menus.length) return `<i>Sem menus neste dia.</i>`;
+  if(!menus.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem menus neste dia.</div>`;
 
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   menus.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
@@ -690,7 +697,7 @@ async function showCantinaReservasHoje() {
 
   div.innerHTML = `
     ${cardRefeicao('pequeno_almoco','🥐','Pequeno Almoço',reservasHojePorTipo.pequeno_almoco.length,'#1565c0')}
-    ${cardRefeicao('almoco','🍽️','Almoço',reservasHojePorTipo.almoco.length,'#2e7d32')}
+    ${cardRefeicao('almoco','🍽️','Almoço (normal)',reservasHojePorTipo.almoco.length,'#2e7d32')}
     ${cardRefeicao('dieta','🥗','Dieta',reservasHojePorTipo.dieta.length,'#f9a825')}
     ${cardRefeicao('jantar','🌙','Jantar',reservasHojePorTipo.jantar.length,'#6a1b9a')}
   `;
@@ -731,9 +738,9 @@ function verDetalheRefeicao(tipo) {
 
   if (lista.length === 0) {
     div.innerHTML = `
+      <button class="btn-back" onclick="showCantinaReservasHoje()">Voltar às Reservas de Hoje</button>
       <h3>${formatarTipoRefeicao(tipo)}</h3>
-      <i>Sem reservas</i>
-      <br><button onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
+      <div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem reservas</div>
     `;
     return;
   }
@@ -741,19 +748,18 @@ function verDetalheRefeicao(tipo) {
   const nomesOrdenados = [...lista].sort((a,b)=> (a.alunos?.nome||"").localeCompare(b.alunos?.nome||""));
 
   div.innerHTML = `
+    <button class="btn-back" onclick="showCantinaReservasHoje()">Voltar às Reservas de Hoje</button>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
       <h3 style="margin:0;">${formatarTipoRefeicao(tipo)} — ${nomesOrdenados.length}</h3>
       <button class="btn-medium" onclick="imprimirListaRefeicao('${tipo}')">🖨️ Exportar / Imprimir</button>
     </div>
-    <div style="margin-top:12px;">
+    <div class="lista-nomes" style="margin-top:12px;">
       ${nomesOrdenados.map((r,i) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #eee;">
-          <span style="color:#999;width:22px;">${i+1}.</span> 👤 ${escapeHtml(r.alunos.nome)}
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #eee;">
+          <span style="color:#999;width:26px;text-align:right;">${i+1}.</span> ${escapeHtml(r.alunos.nome)}
         </div>
       `).join("")}
     </div>
-    <br>
-    <button class="btn-back" onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
   `;
 }
 
@@ -969,7 +975,7 @@ function _estadoReserva(r){
 
 function _cartoesHistoricoDia(iso){
   const doDia = (historicoAtual || []).filter(r => r.data === iso);
-  if(!doDia.length) return `<i>Sem reservas neste dia.</i>`;
+  if(!doDia.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem reservas neste dia.</div>`;
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   doDia.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
 
@@ -1064,9 +1070,9 @@ function exibirHistoricoFiltrado() {
 
   div.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesHistorico(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesHistorico(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesHistorico(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesHistorico(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -1126,7 +1132,7 @@ async function showCantinaSaldos() {
     if (!data || data.length === 0) {
       todosSaldos = [];
       saldosFiltrados = [];
-      div.innerHTML = "<i>✅ Sem dívidas.</i>";
+      div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>✅</div>Sem dívidas.</div>";
       return;
     }
 
@@ -1183,6 +1189,11 @@ function filtrarSaldos() {
 
 function ordenarSaldos(tipo) {
   ordenacaoSaldos = tipo;
+  const chipNome = document.getElementById("ordNome"), chipValor = document.getElementById("ordValor");
+  if(chipNome && chipValor){
+    chipNome.classList.toggle("ativo", tipo === "nome");
+    chipValor.classList.toggle("ativo", tipo === "valor");
+  }
   
   if(tipo === 'nome') {
     saldosFiltrados.sort((a, b) => a.nome.localeCompare(b.nome));
@@ -2022,6 +2033,7 @@ async function exportarLeiturasExcel(){
 
 let _alunosContrato = [];
 let _alunosContratoFiltrados = [];
+let _filtroContrato = "todos";   // 'todos' | 'com' | 'sem' - combinado com a pesquisa por nome
 
 // Um ecrã próprio e não um botão na lista do Histórico: aquela lista é um
 // seletor, e pôr um controlo que muda o que um aluno paga ao lado de "abrir o
@@ -2052,17 +2064,24 @@ async function showCantinaAlunos(){
   }
 
   _alunosContrato = data || [];
-  _alunosContratoFiltrados = [..._alunosContrato];
   document.getElementById("pesquisaAlunosContrato").value = "";
-  _renderAlunosContrato();
+  _filtrarContrato("todos");
 }
 
 function filtrarAlunosContrato(){
   const termo = document.getElementById("pesquisaAlunosContrato").value.toLowerCase().trim();
-  _alunosContratoFiltrados = termo
-    ? _alunosContrato.filter(a => a.nome.toLowerCase().includes(termo))
-    : [..._alunosContrato];
+  _alunosContratoFiltrados = _alunosContrato.filter(a =>
+    (!termo || a.nome.toLowerCase().includes(termo)) &&
+    (_filtroContrato === "todos" || (_filtroContrato === "com") === !!a.tem_contrato)
+  );
   _renderAlunosContrato();
+}
+
+function _filtrarContrato(filtro){
+  _filtroContrato = filtro;
+  document.querySelectorAll("#filtroContratoChips .filtro-chip").forEach(b =>
+    b.classList.toggle("ativo", b.dataset.filtro === filtro));
+  filtrarAlunosContrato();
 }
 
 function _renderAlunosContrato(){
@@ -2087,7 +2106,7 @@ function _renderAlunosContrato(){
           ${a.tem_contrato ? "✅ Com contrato" : "🏷️ Sem contrato"}
         </div>
       </div>
-      <button class="btn-medium"
+      <button class="btn-medium ${a.tem_contrato ? "btn-outline" : ""}"
               onclick="_alternarContrato('${a.id}', ${a.tem_contrato})">
         ${a.tem_contrato ? "Retirar contrato" : "Dar contrato"}
       </button>
@@ -2129,7 +2148,7 @@ async function _alternarContrato(alunoId, temContratoAtual){
   }
 
   if(aluno) aluno.tem_contrato = !temContratoAtual;
-  _renderAlunosContrato();
+  filtrarAlunosContrato();
 }
 
 async function guardarPrecoSemContrato(){
