@@ -610,6 +610,7 @@ async function menu(){
       <button class="btn-full" onclick="showCriarMenu()">Criar Menus</button>
       <button class="btn-full" onclick="showMenusCriados()">Menus Criados</button>
       <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
+      <button class="btn-full" onclick="showLeitorCodigo()">📷 Leitor</button>
       <button class="btn-full" onclick="showCantinaHistorico()">Histórico de Aluno</button>
       <button class="btn-full" onclick="showPedidosCancelamento()">Pedidos de Cancelamento</button>
       <button class="btn-full" onclick="showCantinaSaldos()">Valores Pendentes</button>

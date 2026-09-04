@@ -1839,3 +1839,124 @@ async function alterarReservaDireto(reservaId, decisao){
     hideLoading();
   }
 }
+
+/* ==============================
+   CANTINA — LEITOR DE CÓDIGOS
+============================== */
+
+let _leitorTipo = null;
+let _leitorHistorico = [];
+
+// A refeição escolhe-se UMA vez e fica visível em grande o tempo todo. Um turno
+// esquecido depois do pequeno-almoço tem de saltar à vista aqui, e não ser
+// descoberto na exportação uma semana depois.
+function showLeitorCodigo(){
+  show("cantinaLeitor");
+  _leitorTipo = null;
+  _leitorHistorico = [];
+  _renderLeitor();
+}
+
+function _leitorEscolherTipo(tipo){
+  _leitorTipo = tipo;
+  _renderLeitor();
+}
+
+function _renderLeitor(){
+  const div = document.getElementById("leitorConteudo");
+
+  if(!_leitorTipo){
+    div.innerHTML = `
+      <p>Que refeição estás a servir?</p>
+      <button class="btn-full" onclick="_leitorEscolherTipo('pequeno_almoco')">🥐 Pequeno Almoço</button>
+      <button class="btn-full" onclick="_leitorEscolherTipo('almoco')">🍽️ Almoço</button>
+      <button class="btn-full" onclick="_leitorEscolherTipo('jantar')">🌙 Jantar</button>
+    `;
+    return;
+  }
+
+  div.innerHTML = `
+    <div style="background:#1565c0;color:#fff;padding:14px;border-radius:12px;
+                font-size:22px;font-weight:800;text-align:center;">
+      ${emojiTipo(_leitorTipo)} ${formatarTipoRefeicao(_leitorTipo)}
+      <button class="btn-medium" style="margin-left:12px;"
+              onclick="_leitorEscolherTipo(null)">Mudar</button>
+    </div>
+
+    <input id="leitorInput" autocomplete="off" inputmode="numeric"
+           placeholder="Passa o código..."
+           style="width:100%;box-sizing:border-box;font-size:20px;padding:12px;
+                  margin-top:14px;text-align:center;">
+
+    <div id="leitorResultado" style="margin-top:16px;"></div>
+
+    <div style="margin-top:18px;color:#666;font-size:13px;">
+      Leituras nesta sessão: <b id="leitorContagem">${_leitorHistorico.length}</b>
+    </div>
+    <div id="leitorHistorico" style="margin-top:8px;"></div>
+  `;
+
+  const input = document.getElementById("leitorInput");
+
+  // O leitor USB é um teclado: escreve os dígitos e carrega em Enter. Não há
+  // API de dispositivo nenhuma aqui — é só um keydown.
+  input.addEventListener("keydown", (e) => {
+    if(e.key !== "Enter") return;
+    e.preventDefault();
+    const codigo = input.value.trim();
+    input.value = "";
+    if(codigo) _leitorProcessar(codigo);
+  });
+
+  // O foco tem de ser agressivo. Uma leitura para uma página sem foco perde-se
+  // em silêncio, e ao balcão isso é um aluno que se vai embora sem ficar
+  // registado.
+  input.focus();
+  document.getElementById("cantinaLeitor").onclick = () => input.focus();
+}
+
+async function _leitorProcessar(codigo){
+  const div = document.getElementById("leitorResultado");
+  div.innerHTML = "⏳";
+
+  const { data, error } = await supabaseClient.rpc("registar_leitura", {
+    p_codigo: codigo,
+    p_tipo: _leitorTipo
+  });
+
+  if(error){
+    div.innerHTML = `<div style="background:#c62828;color:#fff;padding:18px;border-radius:12px;">
+      ❌ Erro: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const r = (data && data[0]) || {};
+  const cores = {
+    servido:             { cor:"#2e7d32", icone:"✅", texto:"PODE SERVIR" },
+    sem_reserva:         { cor:"#c62828", icone:"⛔", texto:"SEM RESERVA" },
+    cancelada:           { cor:"#c62828", icone:"⛔", texto:"RESERVA CANCELADA" },
+    repetido:            { cor:"#f9a825", icone:"⚠️", texto:"JÁ TINHA SIDO SERVIDO" },
+    codigo_desconhecido: { cor:"#c62828", icone:"❓", texto:"CÓDIGO DESCONHECIDO" }
+  };
+  const e = cores[r.resultado] || { cor:"#666", icone:"❓", texto:r.resultado || "?" };
+
+  div.innerHTML = `
+    <div style="background:${e.cor};color:#fff;padding:22px;border-radius:14px;text-align:center;">
+      <div style="font-size:40px;">${e.icone}</div>
+      <div style="font-size:22px;font-weight:800;margin-top:6px;">${e.texto}</div>
+      <div style="font-size:20px;margin-top:10px;">${escapeHtml(r.nome || codigo)}</div>
+      ${r.is_dieta ? `<div style="margin-top:10px;font-size:20px;font-weight:800;
+        background:#fff;color:#f9a825;border-radius:8px;padding:6px;">🥗 DIETA</div>` : ""}
+    </div>
+  `;
+
+  _leitorHistorico.unshift({ nome: r.nome || codigo, resultado: r.resultado });
+  document.getElementById("leitorContagem").textContent = _leitorHistorico.length;
+  document.getElementById("leitorHistorico").innerHTML = _leitorHistorico
+    .slice(0, 5)
+    .map(h => `<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:14px;">
+        ${escapeHtml(h.nome)} — ${escapeHtml(h.resultado)}</div>`)
+    .join("");
+
+  document.getElementById("leitorInput").focus();
+}
