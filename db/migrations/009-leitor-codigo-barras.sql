@@ -153,3 +153,124 @@ CREATE POLICY "Cantina ve as leituras" ON public.leituras
   USING (EXISTS (SELECT 1 FROM cantina WHERE cantina.id = auth.uid()));
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 4 - Registar uma leitura
+-- =============================================================================
+BEGIN;
+
+-- Devolve o NOME do aluno de proposito, e o ecra mostra-o em grande: quem esta
+-- ao balcao tem de poder confrontar o nome com a cara que tem a frente. Um
+-- leitor que so diz "OK" autentica um telemovel, nao autentica um aluno.
+--
+-- Devolve tambem o is_dieta, para servir o prato certo. A dieta ja vive na
+-- reserva do almoco e ja e por ela que a cozinha se divide no ecra das
+-- Reservas do Dia.
+--
+-- "Hoje" e sempre (now() AT TIME ZONE 'Europe/Lisbon')::date, pela mesma razao
+-- que a 002 documenta ao pormenor: o servidor corre em UTC e a escola nao, por
+-- isso logo a seguir a meia-noite em Lisboa o CURRENT_DATE ainda e ontem.
+--
+-- O 'repetido' e GRAVADO, nao e suprimido. Um leitor que dispara duas vezes
+-- tem de ser visivel nos dados em vez de ser absorvido em silencio.
+CREATE OR REPLACE FUNCTION public.registar_leitura(p_codigo text, p_tipo text)
+RETURNS TABLE(resultado text, nome text, is_dieta boolean)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  v_uid       uuid := auth.uid();
+  v_hoje      date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  v_aluno     record;
+  v_res       record;
+  v_resultado text;
+  v_reserva   uuid;
+  v_dieta     boolean := false;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina c WHERE c.id = v_uid) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode registar leituras';
+  END IF;
+
+  IF p_tipo NOT IN ('pequeno_almoco', 'almoco', 'jantar') THEN
+    RAISE EXCEPTION 'Tipo de refeicao invalido: %', p_tipo USING ERRCODE = 'LEI01';
+  END IF;
+
+  SELECT a.id, a.nome INTO v_aluno FROM alunos a WHERE a.codigo = p_codigo;
+
+  IF NOT FOUND THEN
+    INSERT INTO leituras (aluno_id, codigo_lido, tipo, data, resultado, criado_por)
+    VALUES (NULL, p_codigo, p_tipo, v_hoje, 'codigo_desconhecido', v_uid);
+
+    RETURN QUERY SELECT 'codigo_desconhecido'::text, NULL::text, false;
+    RETURN;
+  END IF;
+
+  -- No maximo uma linha: reservas tem UNIQUE (aluno_id, data, tipo) desde a 001.
+  SELECT r.id, r.ativa, r.is_dieta INTO v_res
+  FROM reservas r
+  WHERE r.aluno_id = v_aluno.id AND r.data = v_hoje AND r.tipo = p_tipo;
+
+  IF NOT FOUND THEN
+    v_resultado := 'sem_reserva';
+  ELSIF NOT v_res.ativa THEN
+    -- Separavel do sem_reserva unicamente porque a linha cancelada sobrevive.
+    v_resultado := 'cancelada';
+    v_reserva   := v_res.id;
+  ELSIF EXISTS (
+      SELECT 1 FROM leituras l
+      WHERE l.aluno_id  = v_aluno.id
+        AND l.data      = v_hoje
+        AND l.tipo      = p_tipo
+        AND l.resultado = 'servido'
+  ) THEN
+    v_resultado := 'repetido';
+    v_reserva   := v_res.id;
+    v_dieta     := coalesce(v_res.is_dieta, false);
+  ELSE
+    v_resultado := 'servido';
+    v_reserva   := v_res.id;
+    v_dieta     := coalesce(v_res.is_dieta, false);
+  END IF;
+
+  INSERT INTO leituras (aluno_id, codigo_lido, tipo, data, resultado, reserva_id, criado_por)
+  VALUES (v_aluno.id, p_codigo, p_tipo, v_hoje, v_resultado, v_reserva, v_uid);
+
+  RETURN QUERY SELECT v_resultado, v_aluno.nome, v_dieta;
+END; $fn$;
+
+-- A licao da 004, 005 e 006: o EXECUTE por omissao vai para o PUBLIC.
+REVOKE EXECUTE ON FUNCTION public.registar_leitura(text, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.registar_leitura(text, text) TO authenticated;
+
+COMMIT;
+
+-- =============================================================================
+-- VERIFICACAO
+-- =============================================================================
+-- 1) Todos os alunos com codigo unico de seis digitos:
+--
+--   SELECT count(*) AS total, count(codigo) AS com_codigo,
+--          count(DISTINCT codigo) AS distintos,
+--          count(*) FILTER (WHERE codigo !~ '^[0-9]{6}$') AS mal_formados
+--   FROM alunos;
+--   Esperado: total = com_codigo = distintos, mal_formados = 0.
+--
+-- 2) A LISTA FINAL DE COLUNAS ESCREVIVEIS. Esta e a verificacao que apanha o
+--    conflito com a 008 descrito na seccao 2. Correr SEMPRE, e sobretudo depois
+--    de aplicar a outra das duas migracoes:
+--
+--   SELECT column_name FROM information_schema.column_privileges
+--   WHERE table_name = 'alunos' AND grantee = 'authenticated'
+--     AND privilege_type = 'UPDATE' ORDER BY 1;
+--   Esperado: exatamente nome e email. Nem codigo, nem tem_contrato.
+--
+-- 3) A funcao corre com os direitos de quem a criou e o anon nao lhe chega:
+--
+--   SELECT proname, prosecdef, proacl FROM pg_proc
+--   WHERE pronamespace = 'public'::regnamespace AND proname = 'registar_leitura';
+--   Esperado: prosecdef = t, sem `anon=` e sem a entrada vazia `=X/postgres`.
+--
+-- 4) O registo nao tem como ser reescrito:
+--
+--   SELECT grantee, privilege_type FROM information_schema.role_table_grants
+--   WHERE table_name = 'leituras' ORDER BY 1, 2;
+--   Esperado: nenhum UPDATE nem DELETE para anon ou authenticated.
+-- =============================================================================
