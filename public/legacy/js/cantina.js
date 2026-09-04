@@ -1106,10 +1106,15 @@ async function showCantinaSaldos() {
   showLoading("⏳ Carregando valores em dívida...");
 
   try {
-    const { data, error } = await supabaseClient
-      .from("reservas")
-      .select("aluno_id, preco, alunos(nome)")
-      .eq("ativa", true);
+    // A soma é feita na base de dados (saldos_por_aluno, migração 007). Antes
+    // este ecrã ia buscar TODAS as reservas ativas e somava aqui, e o PostgREST
+    // corta a resposta nas 1000 linhas por omissão: os alunos que ficavam de
+    // fora apareciam sem dívida nenhuma, e o que calhava em cima do corte
+    // aparecia com parte da dívida - tudo em silêncio, e esta é a lista pela
+    // qual a cantina cobra. Terceira aparição do mesmo defeito (relatório
+    // mensal, histórico de aluno, e este). A função devolve exatamente o que
+    // este ecrã já consumia: { id, nome, total, refeicoes }.
+    const { data, error } = await supabaseClient.rpc("saldos_por_aluno");
 
     if (error) {
       handleError(error, "Erro ao carregar Valores em Dívida");
@@ -1124,19 +1129,7 @@ async function showCantinaSaldos() {
       return;
     }
 
-    const saldsMap = {};
-    data.forEach(r => {
-      if (!saldsMap[r.aluno_id]) {
-        saldsMap[r.aluno_id] = { 
-          id: r.aluno_id, 
-          nome: r.alunos.nome, 
-          total: 0 
-        };
-      }
-      saldsMap[r.aluno_id].total += Number(r.preco);
-    });
-
-    todosSaldos = Object.values(saldsMap);
+    todosSaldos = data.map(s => ({ id: s.id, nome: s.nome, total: Number(s.total) }));
     saldosFiltrados = [...todosSaldos];
     ordenarSaldos('nome');
 
@@ -1551,11 +1544,11 @@ function exportarRelatorioExcel(dados, ano, mes) {
 ============================= */
 
 async function exportarSaldosExcel() {
-  
-  const { data, error } = await supabaseClient
-    .from("reservas")
-    .select("aluno_id, preco, alunos(nome)")
-    .eq("ativa", true);
+  // Mesma consulta que o ecrã, pela mesma razão: a soma no browser sobre a
+  // tabela inteira parava nas 1000 linhas e o Excel saía com valores errados.
+  // Ver showCantinaSaldos. A função já vem ordenada por nome e traz o número
+  // de refeições, que é a coluna que este ficheiro precisa e o ecrã não.
+  const { data, error } = await supabaseClient.rpc("saldos_por_aluno");
 
   if (error) {
     mostrarErro("Erro", "Erro ao buscar valores em dívida: " + error.message);
@@ -1568,30 +1561,20 @@ async function exportarSaldosExcel() {
     return;
   }
 
-  const saldos = {};
-  data.forEach(r => {
-    if (!saldos[r.aluno_id]) {
-      saldos[r.aluno_id] = { nome: r.alunos.nome, total: 0, refeicoes: 0 };
-    }
-    saldos[r.aluno_id].total += Number(r.preco);
-    saldos[r.aluno_id].refeicoes += 1;
-  });
-
   const linhas = [["Aluno", "Refeições", "Total Dívida (€)"]];
   let totalGeral = 0;
   let refeicaoesTotal = 0;
 
-  Object.entries(saldos)
-    .sort((a, b) => a[1].nome.localeCompare(b[1].nome))
-    .forEach(([id, aluno]) => {
-      linhas.push([
-        aluno.nome,
-        aluno.refeicoes,
-        aluno.total.toFixed(2)
-      ]);
-      totalGeral += aluno.total;
-      refeicaoesTotal += aluno.refeicoes;
-    });
+  data.forEach(aluno => {
+    const total = Number(aluno.total);
+    linhas.push([
+      aluno.nome,
+      aluno.refeicoes,
+      total.toFixed(2)
+    ]);
+    totalGeral += total;
+    refeicaoesTotal += aluno.refeicoes;
+  });
 
   linhas.push([]);
   linhas.push(["TOTAL", refeicaoesTotal, totalGeral.toFixed(2)]);
