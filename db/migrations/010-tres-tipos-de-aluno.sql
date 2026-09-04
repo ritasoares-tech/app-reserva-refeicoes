@@ -59,3 +59,45 @@ REVOKE UPDATE ON public.alunos FROM authenticated;
 GRANT  UPDATE (nome, email) ON public.alunos TO authenticated;
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 2 - O almoco automatico so para o contrato completo
+-- =============================================================================
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.criar_reservas_automaticas_almoco()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+BEGIN
+  IF NEW.tipo = 'almoco' THEN
+    INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta)
+    SELECT a.id, NEW.id, NEW.tipo, NEW.data, NEW.preco, true, false
+    FROM alunos a
+    WHERE a.tipo_contrato = 'completo'
+    ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+  END IF;
+  RETURN NEW;
+END; $function$;
+
+-- Trigger AFTER INSERT: o NEW.tipo_contrato ja vem com o default aplicado.
+CREATE OR REPLACE FUNCTION public.criar_reservas_almoco_novo_aluno()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_local timestamp := now() AT TIME ZONE 'Europe/Lisbon';
+  v_hoje  date      := v_local::date;
+  v_hora  time      := v_local::time;
+BEGIN
+  IF NEW.tipo_contrato <> 'completo' THEN
+    RETURN NEW;
+  END IF;
+
+  INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta)
+  SELECT NEW.id, m.id, m.tipo, m.data, m.preco, true, false
+  FROM menus m
+  WHERE m.tipo = 'almoco'
+    AND (m.data > v_hoje OR (m.data = v_hoje AND v_hora < TIME '09:00'))
+  ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+
+  RETURN NEW;
+END; $$;
+
+COMMIT;
