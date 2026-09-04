@@ -101,3 +101,70 @@ BEGIN
 END; $$;
 
 COMMIT;
+
+-- =============================================================================
+-- SECCAO 3 - definir_tipo_contrato
+-- =============================================================================
+BEGIN;
+
+-- Substitui a definir_contrato_aluno(uuid, boolean) da 008. Manter as duas era
+-- ter dois caminhos para a mesma coisa; so o ecra dos Alunos a chamava e o
+-- ecra muda na mesma.
+DROP FUNCTION IF EXISTS public.definir_contrato_aluno(uuid, boolean);
+
+-- Cancela (nao apaga, nao reprecifica) os almocos AUTOMATICOS, ATIVOS e
+-- FUTUROS sempre que o tipo NOVO nao e completo: para parcial porque deixam
+-- de ser automaticos e o aluno marca-os sozinho ao preco do menu, para sem
+-- pela razao da 008. Quem ja nao e completo nao tem automaticos, por isso
+-- parcial <-> sem cancela zero. Para completo nao cria nada retroativamente.
+-- Devolve quantos cancelou.
+CREATE OR REPLACE FUNCTION public.definir_tipo_contrato(p_aluno_id uuid, p_tipo text)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE
+  v_hoje       date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  v_cancelados integer := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina c WHERE c.id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode alterar o contrato de um aluno';
+  END IF;
+  IF p_tipo NOT IN ('completo', 'parcial', 'sem') THEN
+    RAISE EXCEPTION 'Tipo de contrato invalido: %', p_tipo USING ERRCODE = 'RES10';
+  END IF;
+
+  UPDATE alunos a SET tipo_contrato = p_tipo WHERE a.id = p_aluno_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Aluno inexistente' USING ERRCODE = 'RES08';
+  END IF;
+
+  IF p_tipo <> 'completo' THEN
+    UPDATE reservas r SET cancelamento_tipo = 'contrato'
+    WHERE r.aluno_id = p_aluno_id AND r.tipo = 'almoco' AND r.automatico AND r.ativa AND r.data > v_hoje;
+    GET DIAGNOSTICS v_cancelados = ROW_COUNT;
+  END IF;
+
+  RETURN v_cancelados;
+END; $fn$;
+
+REVOKE EXECUTE ON FUNCTION public.definir_tipo_contrato(uuid, text) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.definir_tipo_contrato(uuid, text) TO authenticated;
+
+COMMIT;
+
+-- =============================================================================
+-- VERIFICACAO
+-- =============================================================================
+-- 1) Tres valores, sem nulos, tem_contrato coerente:
+--   SELECT tipo_contrato, tem_contrato, count(*) FROM alunos GROUP BY 1, 2 ORDER BY 1;
+--   Esperado: completo/t, parcial/t, sem/f (os que existirem); nunca um NULL.
+-- 2) A lista final de colunas escreviveis (partilhada com a 008 e a 009):
+--   SELECT column_name FROM information_schema.column_privileges
+--   WHERE table_name = 'alunos' AND grantee = 'authenticated' AND privilege_type = 'UPDATE' ORDER BY 1;
+--   Esperado: exatamente email e nome.
+-- 3) A funcao antiga desapareceu e a nova e SECURITY DEFINER sem anon:
+--   SELECT proname, prosecdef, proacl FROM pg_proc WHERE pronamespace = 'public'::regnamespace
+--     AND proname IN ('definir_contrato_aluno', 'definir_tipo_contrato');
+--   Esperado: so definir_tipo_contrato, prosecdef = t, sem `anon=`.
+-- 4) Nenhum valor ja cobrado se moveu (como a cantina):
+--   SELECT count(*), sum(total) FROM saldos_por_aluno();
+--   Esperado: identico ao de antes de aplicar isto.
+-- =============================================================================
