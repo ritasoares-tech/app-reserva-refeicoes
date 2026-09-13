@@ -85,19 +85,24 @@ COMMENT ON COLUMN public.configuracao.dia_bloqueio IS
 -- 1.3 - A excecao manual da cantina
 -- -----------------------------------------------------------------------------
 -- A cantina pode levantar o bloqueio COM A DIVIDA POR PAGAR - um acordo, uma
--- explicacao. Vale UM MES DE CALENDARIO e depois caduca; se o acordo se
--- mantiver, a cantina volta a dar no mes seguinte.
+-- explicacao. A cantina aceitou a razao do atraso, e isso vale como ter pago
+-- ATE AO PROXIMO PAGAMENTO: uma excecao dada no mes M cobre ate a vespera do
+-- dia_bloqueio do mes M+1 (dia 14, com o 15 de sempre). Depois caduca; se o
+-- acordo se mantiver, a cantina volta a dar. Regra do Pedro, 2026-09-13.
 --
 -- MESMA FORMA DA meses_liquidados, de proposito: e ja a tabela que responde
 -- "este mes deste aluno esta tratado", e o predicado testa-a com o mesmo
 -- EXISTS. Uma coluna na alunos respondia ao mesmo com o mesmo custo e PERDIA
 -- QUEM AUTORIZOU E PORQUE, que e a unica razao para deixar passar uma divida.
 --
--- Nao ha coluna de validade e nao ha tarefa de limpeza: o predicado so olha
--- para a linha do mes corrente, por isso a excecao caduca sozinha no dia 1.
--- ATENCAO a consequencia: no dia 1 a divida que a excecao cobria passa a ter
--- dois meses, e isso bloqueia logo, sem esperar pelo dia 15. Se o acordo se
--- mantiver, a cantina tem de renovar a excecao logo no inicio do mes.
+-- Nao ha coluna de validade e nao ha tarefa de limpeza: o fim de uma excecao
+-- calcula-se do (ano, mes) dela e do dia_bloqueio, pelo desbloqueio_ate (1.4),
+-- e passado esse dia ela simplesmente deixa de contar. As linhas antigas ficam:
+-- sao o registo de quem deixou passar uma divida e porque.
+--
+-- Porque nao so ate ao fim do mes: no dia 1 a divida que a excecao cobria passa
+-- a ter dois meses, e uma divida de dois meses bloqueia todos os dias. A
+-- excecao acabava por durar menos do que o proprio mes de tolerancia.
 CREATE TABLE public.desbloqueios (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   aluno_id            uuid NOT NULL REFERENCES public.alunos(id)  ON DELETE CASCADE,
@@ -110,8 +115,9 @@ CREATE TABLE public.desbloqueios (
 );
 
 COMMENT ON TABLE public.desbloqueios IS
-  'Excecoes dadas pela cantina: levantam o bloqueio de um aluno durante um mes '
-  'de calendario, com a divida por pagar. Guarda quem autorizou e porque.';
+  'Excecoes dadas pela cantina: levantam o bloqueio de um aluno com a divida por '
+  'pagar, do mes em que sao dadas ate a vespera do dia_bloqueio do mes seguinte '
+  '(ver desbloqueio_ate). Guarda quem autorizou e porque.';
 
 -- O UNIQUE ja cria o indice por (aluno_id, ano, mes), que e exatamente a
 -- consulta do predicado. Nao ha segundo indice a criar.
@@ -138,7 +144,7 @@ CREATE POLICY desbloqueios_cantina_le_todos ON public.desbloqueios
 -- -----------------------------------------------------------------------------
 -- 1.4 - O predicado
 -- -----------------------------------------------------------------------------
--- Bloqueado quando a cantina nao deu excecao este mes E:
+-- Bloqueado quando nao ha excecao da cantina em vigor (desbloqueio_ate) E:
 --   a) existe um mes por pagar de ha DOIS meses ou mais - todos os dias; OU
 --   b) o mes ANTERIOR esta por pagar e hoje ja e o dia_bloqueio ou depois.
 --
@@ -161,6 +167,30 @@ CREATE POLICY desbloqueios_cantina_le_todos ON public.desbloqueios
 --
 -- SECURITY DEFINER porque o aluno tem de poder saber que esta bloqueado sem ter
 -- SELECT na meses_em_divida.
+--
+-- Primeiro, ATE QUANDO vale a excecao mais recente do aluno - o ultimo dia de
+-- Lisboa que ainda cobre, ou NULL sem nenhuma. Uma funcao so, usada pelo
+-- predicado, pelo revogar_desbloqueio e pelos dois ecras, para que "a excecao
+-- esta em vigor" tenha uma definicao e o ecra mostre a data que o predicado usa.
+--
+--   (1 do mes seguinte ao da excecao) + (dia_bloqueio - 2) dias
+--   = a vespera do dia_bloqueio do mes seguinte. Com dia_bloqueio 1 da o ultimo
+--   dia do proprio mes, que e o certo: o bloqueio seguinte entra no dia 1.
+CREATE OR REPLACE FUNCTION public.desbloqueio_ate(p_aluno_id uuid)
+RETURNS date LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+  SELECT max((make_date(d.ano, d.mes, 1) + INTERVAL '1 month')::date
+             + ((SELECT c.dia_bloqueio FROM configuracao c) - 2))
+  FROM desbloqueios d
+  WHERE d.aluno_id = p_aluno_id;
+$fn$;
+
+COMMENT ON FUNCTION public.desbloqueio_ate(uuid) IS
+  'Ultimo dia (Lisboa) coberto pela excecao mais recente do aluno: a vespera do '
+  'dia_bloqueio do mes seguinte ao da excecao. NULL sem nenhuma.';
+
+REVOKE EXECUTE ON FUNCTION public.desbloqueio_ate(uuid) FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.desbloqueio_ate(uuid) TO authenticated;
+
 CREATE OR REPLACE FUNCTION public.aluno_bloqueado(p_aluno_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
   WITH por_pagar AS (
@@ -183,17 +213,12 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
             AND EXTRACT(DAY FROM (now() AT TIME ZONE 'Europe/Lisbon'))::int
                   >= (SELECT c.dia_bloqueio FROM configuracao c))
          )
-     AND NOT EXISTS (
-           SELECT 1
-           FROM desbloqueios d
-           WHERE d.aluno_id = p_aluno_id
-             AND d.ano = EXTRACT(YEAR  FROM (now() AT TIME ZONE 'Europe/Lisbon'))::int
-             AND d.mes = EXTRACT(MONTH FROM (now() AT TIME ZONE 'Europe/Lisbon'))::int
-         );
+     AND NOT coalesce(public.desbloqueio_ate(p_aluno_id)
+                        >= (now() AT TIME ZONE 'Europe/Lisbon')::date, false);
 $fn$;
 
 COMMENT ON FUNCTION public.aluno_bloqueado(uuid) IS
-  'Verdadeiro quando a cantina nao deu excecao este mes e o aluno tem por '
+  'Verdadeiro quando nao ha excecao em vigor e o aluno tem por '
   'pagar um mes de ha dois meses ou mais, ou o mes anterior depois do dia_bloqueio.';
 
 -- A licao da 004, 005 e 006 aplicada a nascenca, como na 007.
@@ -670,7 +695,8 @@ BEGIN;
 -- 4.1 - Conceder
 -- -----------------------------------------------------------------------------
 -- A cantina pode chegar a acordo com um aluno, ou aceitar uma explicacao, e
--- levantar o bloqueio COM A DIVIDA POR PAGAR. Vale o mes corrente.
+-- levantar o bloqueio COM A DIVIDA POR PAGAR. Fica registada no mes corrente e
+-- vale ate a vespera do dia_bloqueio do mes seguinte (desbloqueio_ate).
 --
 -- ON CONFLICT DO UPDATE, e nao DO NOTHING: dar outra vez no mesmo mes e
 -- corrigir a razao, nao um erro. Guarda sempre quem autorizou.
@@ -705,7 +731,9 @@ COMMENT ON FUNCTION public.conceder_desbloqueio(uuid, text) IS
 -- -----------------------------------------------------------------------------
 -- 4.2 - Revogar
 -- -----------------------------------------------------------------------------
--- Apaga a excecao do mes corrente E VOLTA A SUSPENDER JA. Sem a segunda metade,
+-- Apaga a excecao EM VIGOR E VOLTA A SUSPENDER JA. Em vigor e o que o
+-- desbloqueio_ate cobre hoje - pode ser a do mes anterior, do dia 1 ao 14. As
+-- que ja nao cobrem nada ficam, como registo. Sem a segunda metade,
 -- revogar nao fazia nada visivel ate a tarefa da madrugada seguinte, que nao e
 -- o que a palavra quer dizer.
 --
@@ -720,16 +748,17 @@ BEGIN
       USING ERRCODE = 'RES04';
   END IF;
 
-  DELETE FROM desbloqueios
-   WHERE aluno_id = p_aluno_id
-     AND ano = EXTRACT(YEAR  FROM v_hoje)::int
-     AND mes = EXTRACT(MONTH FROM v_hoje)::int;
+  -- A mesma conta do desbloqueio_ate, linha a linha.
+  DELETE FROM desbloqueios d
+   WHERE d.aluno_id = p_aluno_id
+     AND (make_date(d.ano, d.mes, 1) + INTERVAL '1 month')::date
+           + ((SELECT c.dia_bloqueio FROM configuracao c) - 2) >= v_hoje;
 
   RETURN public.suspender_reservas_bloqueadas(p_aluno_id);
 END; $fn$;
 
 COMMENT ON FUNCTION public.revogar_desbloqueio(uuid) IS
-  'Retira a excecao do mes corrente e volta a suspender as refeicoes do aluno '
+  'Retira a excecao em vigor e volta a suspender as refeicoes do aluno '
   'na mesma chamada. Devolve quantas foram suspensas.';
 
 -- A cantina entra na aplicacao como um utilizador autenticado qualquer; e a
@@ -1059,10 +1088,10 @@ COMMIT;
 --
 --   SELECT proname, prosecdef, proacl FROM pg_proc
 --   WHERE pronamespace = 'public'::regnamespace
---     AND proname IN ('aluno_bloqueado', 'alunos_bloqueados',
+--     AND proname IN ('aluno_bloqueado', 'alunos_bloqueados', 'desbloqueio_ate',
 --                     'conceder_desbloqueio', 'revogar_desbloqueio')
 --   ORDER BY 1;
---   Esperado: quatro linhas, prosecdef = t, `authenticated=X` no proacl, e
+--   Esperado: cinco linhas, prosecdef = t, `authenticated=X` no proacl, e
 --   NEM `anon=` NEM uma entrada a comecar por `=X/` (o PUBLIC).
 --
 -- 6) As tres funcoes internas: ninguem de fora lhes chega, nem o authenticated.
@@ -1108,7 +1137,11 @@ COMMIT;
 --
 --   SELECT a.nome FROM alunos a WHERE aluno_bloqueado(a.id) ORDER BY 1;
 --
---   Na copia de testes da zero. NA ESCOLA NAO, e em QUALQUER DIA do mes: todo o
+--   Na copia de testes da zero. NA ESCOLA, SE AS MIGRACOES FOREM APLICADAS
+--   JUNTAS (001 a 011) TAMBEM DA ZERO: a 001 faz TRUNCATE a reservas,
+--   meses_em_divida e meses_liquidados, e sem meses em divida ninguem fica
+--   bloqueado. So nao da zero se a 011 for aplicada numa base que ja tenha
+--   dividas registadas - e ai, em QUALQUER DIA do mes, todo o
 --   aluno com um mes por pagar de ha dois meses ou mais fica bloqueado no
 --   momento em que a 011 e aplicada; e a partir do dia 15 juntam-se os que so
 --   devem o mes anterior. Ficam logo sem poder reservar; as refeicoes deles sao

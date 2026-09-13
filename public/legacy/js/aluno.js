@@ -37,10 +37,10 @@ function _precoNovaMarcacao(tipo, precoMenu){
 //
 // Se a leitura falhar fica-se sem aviso, e não com tudo trancado: a guarda do
 // servidor continua a recusar, e o RES11 tem mensagem própria.
-let _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0 };
+let _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0, ate: null };
 
 async function _carregarBloqueio(alunoId){
-  _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0 };
+  _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0, ate: null };
 
   const { data: bloqueado, error } = await supabaseClient
     .rpc("aluno_bloqueado", { p_aluno_id: alunoId });
@@ -50,14 +50,16 @@ async function _carregarBloqueio(alunoId){
   const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
 
   // A exceção da cantina só se procura em quem não está bloqueado - é a única
-  // razão para um aluno com dívida conseguir marcar.
-  let excecao = false;
+  // razão para um aluno com dívida conseguir marcar. Até quando vale, di-lo o
+  // desbloqueio_ate: a véspera do dia do bloqueio do mês seguinte ao da exceção
+  // (vale como ter pago até ao pagamento seguinte). A data é a que o servidor usa.
+  let excecao = false, ate = null;
   if(!bloqueado){
-    const { data: desbloqueios } = await supabaseClient
-      .from("desbloqueios").select("id")
-      .eq("aluno_id", alunoId).eq("ano", ano).eq("mes", mes);
-    excecao = !!(desbloqueios && desbloqueios.length);
+    const { data: fim } = await supabaseClient.rpc("desbloqueio_ate", { p_aluno_id: alunoId });
+    const hojeLisboa = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+    excecao = !!fim && fim >= hojeLisboa;
     if(!excecao) return;
+    ate = fim;
   }
 
   // O valor em atraso pela mesma definição do aluno_bloqueado: meses FECHADOS
@@ -72,7 +74,7 @@ async function _carregarBloqueio(alunoId){
     .reduce((s, d) => s + Number(d.total), 0);
 
   // Uma exceção que sobrou depois de o aluno pagar não explica nada: não se diz.
-  _bloqueio = { bloqueado: !!bloqueado, desbloqueado: excecao && divida > 0, divida };
+  _bloqueio = { bloqueado: !!bloqueado, desbloqueado: excecao && divida > 0, divida, ate };
 }
 
 function _avisoBloqueio(){
@@ -90,7 +92,7 @@ function _avisoBloqueio(){
     return `
       <div style="background:#e7f5ec;border:1px solid #a8d5b8;border-left:4px solid #2e7d32;border-radius:6px;
                   padding:12px;margin-bottom:14px;color:#1e5b24;font-size:14px;text-align:left;">
-        🔓 A cantina levantou o bloqueio até ao fim do mês.
+        🔓 A cantina levantou o bloqueio até ${formatarData(_bloqueio.ate)}.
       </div>`;
   }
   return "";

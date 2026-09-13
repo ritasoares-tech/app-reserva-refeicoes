@@ -1325,14 +1325,18 @@ async function _renderEstadoBloqueio(alunoId){
   if(!div) return;
   div.innerHTML = "";
 
-  const hoje = new Date();
-  const [{ data: bloqueado, error: erroBloqueado }, { data: excecoes }] = await Promise.all([
+  // A exceção em vigor é a mais recente, enquanto o desbloqueio_ate a cobrir:
+  // vale até à véspera do dia do bloqueio do mês seguinte ao dela, por isso do
+  // dia 1 ao 14 ainda pode ser a do mês passado.
+  const [{ data: bloqueado, error: erroBloqueado }, { data: ate }, { data: excecoes }] = await Promise.all([
     supabaseClient.rpc("aluno_bloqueado", { p_aluno_id: alunoId }),
+    supabaseClient.rpc("desbloqueio_ate", { p_aluno_id: alunoId }),
     supabaseClient.from("desbloqueios")
       .select("motivo, criado_em, cantina_responsavel")
       .eq("aluno_id", alunoId)
-      .eq("ano", hoje.getFullYear())
-      .eq("mes", hoje.getMonth() + 1)
+      .order("ano", { ascending: false })
+      .order("mes", { ascending: false })
+      .limit(1)
   ]);
   if(erroBloqueado){ console.warn("Não foi possível ler o bloqueio:", erroBloqueado); return; }
 
@@ -1351,8 +1355,9 @@ async function _renderEstadoBloqueio(alunoId){
     return;
   }
 
+  const hojeLisboa = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
   const excecao = excecoes && excecoes[0];
-  if(!excecao) return;
+  if(!excecao || !ate || ate < hojeLisboa) return;
 
   let quem = "a cantina";
   const { data: responsavel } = await supabaseClient
@@ -1360,7 +1365,7 @@ async function _renderEstadoBloqueio(alunoId){
   if(responsavel && responsavel.nome) quem = responsavel.nome;
 
   div.innerHTML = painel("#e7f5ec", "#2e7d32", "#1e5b24", `
-    <b>🔓 Desbloqueado até ao fim do mês</b><br>
+    <b>🔓 Desbloqueado até ${formatarData(ate)}</b><br>
     Por ${escapeHtml(quem)} em ${new Date(excecao.criado_em).toLocaleDateString("pt-PT")}.<br>
     Motivo: ${escapeHtml(excecao.motivo)}
     <button class="btn-full" style="margin-top:10px;" onclick="revogarDesbloqueio('${alunoId}')">Revogar</button>
@@ -1376,7 +1381,7 @@ async function desbloquearAluno(alunoId){
     icon: "🔓",
     type: "warning",
     title: "Desbloquear Aluno",
-    message: "O aluno volta a poder reservar e ser servido até ao fim do mês, com a dívida por pagar. As refeições suspensas voltam já.",
+    message: "Vale como se o aluno tivesse pago até ao próximo pagamento: volta a poder reservar e ser servido até à véspera do dia de bloqueio do mês que vem, com a dívida por pagar. As refeições suspensas voltam já.",
     fields: [
       { id: "motivo", type: "textarea", label: "Motivo", required: true }
     ],
