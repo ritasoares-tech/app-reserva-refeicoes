@@ -236,3 +236,173 @@ COMMIT;
 --     AND privilege_type = 'UPDATE';
 --   Esperado: email, nome
 -- =============================================================================
+
+
+-- =============================================================================
+-- SECCAO 2 - suspender, repor, e o gancho na liquidacao
+-- =============================================================================
+BEGIN;
+
+-- -----------------------------------------------------------------------------
+-- 2.1 - Suspender
+-- -----------------------------------------------------------------------------
+-- data >= HOJE, e nao data > HOJE. E DIFERENTE da 008/010, onde a mudanca de
+-- contrato so mexe no estritamente futuro para nao arrancar a meio do dia um
+-- almoco com que o aluno ja contava. Aqui a regra e "nao usa a cantina a partir
+-- do dia X" e a tarefa corre de madrugada, antes de qualquer refeicao. E
+-- deliberado: nao alinhar com a 008 sem ler isto.
+--
+-- O parametro opcional serve o revogar_desbloqueio (seccao 4), que precisa de
+-- suspender um aluno so. NULL = todos.
+CREATE OR REPLACE FUNCTION public.suspender_reservas_bloqueadas(p_aluno_id uuid DEFAULT NULL)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE v_n integer;
+BEGIN
+  UPDATE reservas r
+     SET cancelamento_tipo = 'bloqueado'
+   WHERE r.ativa
+     AND r.data >= (now() AT TIME ZONE 'Europe/Lisbon')::date
+     AND (p_aluno_id IS NULL OR r.aluno_id = p_aluno_id)
+     AND public.aluno_bloqueado(r.aluno_id);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END; $fn$;
+
+COMMENT ON FUNCTION public.suspender_reservas_bloqueadas(uuid) IS
+  'Suspende as refeicoes ativas de hoje em diante de quem esta bloqueado. '
+  'Sem argumento, de todos.';
+
+-- -----------------------------------------------------------------------------
+-- 2.2 - Repor
+-- -----------------------------------------------------------------------------
+-- A ASSIMETRIA E A FUNCAO TODA. Voltam o futuro e o proprio dia; o passado FICA
+-- suspenso para sempre, porque essas refeicoes nao chegaram a ser servidas e
+-- nao podem ser cobradas. Um unico >= separa o correto de faturar comida
+-- recusada.
+--
+-- O preco nao se toca. O reservas_guard congela o preco em UPDATE para toda a
+-- gente e a UNICA excecao e a da 008 ('contrato' -> 'reactivated', porque uma
+-- mudanca de contrato e mesmo um preco novo). Uma suspensao nao e um contrato
+-- novo, por isso NAO entra na excecao - nao ha nada a escrever aqui, mas ha um
+-- teste, porque a excecao do lado faz a resposta errada parecer plausivel.
+CREATE OR REPLACE FUNCTION public.reativar_reservas_bloqueadas(p_aluno_id uuid)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE v_n integer;
+BEGIN
+  UPDATE reservas r
+     SET cancelamento_tipo = NULL
+   WHERE r.aluno_id = p_aluno_id
+     AND r.cancelamento_tipo = 'bloqueado'
+     AND r.data >= (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END; $fn$;
+
+COMMENT ON FUNCTION public.reativar_reservas_bloqueadas(uuid) IS
+  'Repoe as refeicoes suspensas de hoje em diante. As passadas ficam suspensas '
+  'para sempre: nao foram servidas e nao se cobram.';
+
+-- -----------------------------------------------------------------------------
+-- 2.3 - A reconciliacao diaria, NOS DOIS SENTIDOS
+-- -----------------------------------------------------------------------------
+-- O sentido de volta nao e um extra. Sem ele fica um buraco real: um aluno que
+-- nunca paga DEIXA DE ESTAR BLOQUEADO no dia 1 - o dia e menor que o
+-- dia_bloqueio - e ninguem lhe repoe as refeicoes suspensas, porque nao pagou e
+-- nao teve excecao, e nenhum dos dois chamadores da reposicao dispara. Voltava
+-- a poder marcar com as marcacoes que ja tinha mortas.
+--
+-- Diaria, e nao no dia 15: assim nao ha um dia no cron para manter alinhado com
+-- o dia_bloqueio, que e uma definicao e pode mudar. Idempotente - quem ja esta
+-- no estado certo nao da linhas.
+CREATE OR REPLACE FUNCTION public.sincronizar_bloqueios()
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE v_suspensas integer; v_repostas integer;
+BEGIN
+  v_suspensas := public.suspender_reservas_bloqueadas();
+
+  -- Em conjunto, e nao aluno a aluno: e a mesma condicao da reposicao, so que
+  -- sem fixar o aluno.
+  UPDATE reservas r
+     SET cancelamento_tipo = NULL
+   WHERE r.cancelamento_tipo = 'bloqueado'
+     AND r.data >= (now() AT TIME ZONE 'Europe/Lisbon')::date
+     AND NOT public.aluno_bloqueado(r.aluno_id);
+  GET DIAGNOSTICS v_repostas = ROW_COUNT;
+
+  RETURN v_suspensas + v_repostas;
+END; $fn$;
+
+COMMENT ON FUNCTION public.sincronizar_bloqueios() IS
+  'Tarefa diaria: suspende as refeicoes de quem passou a estar bloqueado e '
+  'repoe as de quem deixou de estar. Idempotente.';
+
+-- Estas tres sao chamadas pelo cron e pelas duas RPC da seccao 4, que sao elas
+-- proprias SECURITY DEFINER e nao precisam da concessao. NENHUM papel da
+-- aplicacao lhes chega.
+--
+-- Nao e enfeite: e a quarta vez neste projeto que uma funcao SECURITY DEFINER
+-- ficou ao alcance de qualquer um - o fechar_mes_anterior e o
+-- gerar_avisos_pagamento na 004, o rejeitar_cancelamento_especial na 005 e as
+-- politicas do livro-razao na 006. O REVOKE ao PUBLIC e uma concessao separada
+-- das dos dois papeis e sem ele o buraco ficava aberto na mesma.
+REVOKE EXECUTE ON FUNCTION public.suspender_reservas_bloqueadas(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.reativar_reservas_bloqueadas(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.sincronizar_bloqueios()            FROM PUBLIC, anon, authenticated;
+
+-- -----------------------------------------------------------------------------
+-- 2.4 - O gancho na liquidacao
+-- -----------------------------------------------------------------------------
+-- Corpo da 001 inteiro, mais o bloco do fim. Nada mais mudou: a verificacao do
+-- RES04, o SECURITY DEFINER e as contas sao as mesmas.
+CREATE OR REPLACE FUNCTION public.liquidar_mes_divida(p_aluno_id uuid, p_ano integer, p_mes integer)
+RETURNS TABLE(success boolean, message text, valor_liquidado numeric)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_valor numeric := 0;
+  v_linhas integer := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina WHERE id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode liquidar dividas'
+      USING ERRCODE = 'RES04';
+  END IF;
+
+  SELECT COALESCE(SUM(preco), 0) INTO v_valor
+  FROM reservas
+  WHERE aluno_id = p_aluno_id
+    AND EXTRACT(YEAR  FROM data) = p_ano
+    AND EXTRACT(MONTH FROM data) = p_mes
+    AND ativa;
+
+  IF v_valor = 0 THEN
+    RETURN QUERY SELECT false, 'Nao ha divida para este mes'::text, 0::numeric;
+    RETURN;
+  END IF;
+
+  UPDATE reservas
+  SET cancelamento_tipo = 'payment'
+  WHERE aluno_id = p_aluno_id
+    AND EXTRACT(YEAR  FROM data) = p_ano
+    AND EXTRACT(MONTH FROM data) = p_mes
+    AND ativa;
+
+  GET DIAGNOSTICS v_linhas = ROW_COUNT;
+
+  INSERT INTO meses_liquidados (aluno_id, ano, mes, valor_pago, liquidado_em)
+  VALUES (p_aluno_id, p_ano, p_mes, v_valor, now());
+
+  -- Pagou o ultimo mes em atraso? Entao as refeicoes futuras suspensas voltam
+  -- ja. Pagamento parcial nao desbloqueia: havendo outro mes fechado por pagar,
+  -- o aluno_bloqueado continua verdadeiro e isto nao faz nada.
+  --
+  -- A ORDEM IMPORTA: liquidar primeiro, repor depois. Ao contrario, as
+  -- refeicoes repostas entravam na soma do mes que se esta a liquidar.
+  IF NOT public.aluno_bloqueado(p_aluno_id) THEN
+    PERFORM public.reativar_reservas_bloqueadas(p_aluno_id);
+  END IF;
+
+  RETURN QUERY SELECT true,
+    format('%s reserva(s) liquidada(s) com sucesso', v_linhas)::text,
+    v_valor;
+END; $$;
+
+COMMIT;
