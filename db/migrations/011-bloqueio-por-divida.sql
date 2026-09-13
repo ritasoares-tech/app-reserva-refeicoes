@@ -406,3 +406,235 @@ BEGIN
 END; $$;
 
 COMMIT;
+
+
+-- =============================================================================
+-- SECCAO 3 - a guarda, o reservar_refeicao, e o almoco automatico
+-- =============================================================================
+BEGIN;
+
+-- -----------------------------------------------------------------------------
+-- 3.1 - A guarda
+-- -----------------------------------------------------------------------------
+-- Corpo da 003 PASSO 2 inteiro, mais UMA condicao em cada ramo. Nada mais
+-- mudou: o RES03, o RES05, o RES06 e o RES07 estao como estavam.
+--
+-- A condicao esta escrita sobre o ESTADO RESULTANTE - "esta linha vai ficar
+-- ativa?" - e nao sobre a operacao. Assim apanha de uma so vez a reserva nova,
+-- a reativacao que o reservar_refeicao faz por ON CONFLICT, e qualquer chamada
+-- direta ao PostgREST. E deixa passar o cancelamento, que torna a linha MENOS
+-- ativa: quem nao consegue pagar deve poder tirar refeicoes da conta.
+--
+-- AS ISENCOES SAO O PONTO DE ESTAR AQUI DENTRO DO IF, e nao fora:
+--   sistema (auth.uid() IS NULL) - a sincronizacao e os dois triggers de
+--     alastramento TEM de conseguir escrever linhas 'bloqueado';
+--   cantina - quem pode levantar o bloqueio inteiro nao pode ser travado por
+--     ele. (Nota: a cantina nao tem politica de INSERT na reservas, so UPDATE,
+--     por isso na pratica isto vale para alterar reservas que ja existem.)
+CREATE OR REPLACE FUNCTION public.reservas_guard()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  v_uid      uuid    := auth.uid();
+  v_sistema  boolean := v_uid IS NULL;   -- service_role, triggers, migracoes
+  v_staff    boolean := NOT (v_uid IS NULL)
+                        AND EXISTS (SELECT 1 FROM cantina WHERE id = v_uid);
+  m          record;
+  v_contrato boolean;
+  v_preco_sc numeric;
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    -- F6: preco, tipo e data vem do menu. Nunca do cliente, para ninguem.
+    SELECT preco, tipo, data INTO m FROM menus WHERE id = NEW.menu_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Menu inexistente' USING ERRCODE = 'RES03';
+    END IF;
+    NEW.tipo := m.tipo;
+    NEW.data := m.data;
+
+    NEW.preco := public.preco_para_reserva(NEW.aluno_id, m.tipo, m.preco);
+
+    IF NOT v_sistema AND NOT v_staff THEN
+      IF NEW.aluno_id <> v_uid THEN
+        RAISE EXCEPTION 'So podes reservar para ti' USING ERRCODE = 'RES05';
+      END IF;
+      IF now() >= public.prazo_limite(NEW.tipo, NEW.data) THEN
+        RAISE EXCEPTION 'Prazo ultrapassado para esta refeicao'
+          USING ERRCODE = 'RES06';
+      END IF;
+      IF (NEW.cancelamento_tipo IS NULL OR NEW.cancelamento_tipo = 'reactivated')
+         AND public.aluno_bloqueado(NEW.aluno_id) THEN
+        RAISE EXCEPTION 'Tens valores em atraso. Regulariza na cantina.'
+          USING ERRCODE = 'RES11';
+      END IF;
+    END IF;
+
+  ELSE  -- UPDATE
+    -- Imutaveis depois de criada, para toda a gente. Uma reserva nao muda de
+    -- dono, de menu, de dia, de tipo nem de preco: se for preciso outra coisa,
+    -- cancela-se esta e cria-se outra.
+    NEW.aluno_id   := OLD.aluno_id;
+    NEW.menu_id    := OLD.menu_id;
+    NEW.data       := OLD.data;
+    NEW.tipo       := OLD.tipo;
+    NEW.criado_em  := OLD.criado_em;
+    NEW.automatico := OLD.automatico;
+
+    IF OLD.cancelamento_tipo = 'contrato' AND NEW.cancelamento_tipo = 'reactivated' THEN
+      -- A excecao da 008: marcacao nova, preco de hoje. O 'bloqueado' NAO entra
+      -- aqui de proposito - uma suspensao e a mesma refeicao nas mesmas
+      -- condicoes, so retida uns dias, por isso o preco fica congelado como em
+      -- qualquer outra reativacao.
+      SELECT preco INTO m FROM menus WHERE id = OLD.menu_id;
+      NEW.preco := public.preco_para_reserva(OLD.aluno_id, OLD.tipo, m.preco);
+    ELSE
+      NEW.preco := OLD.preco;
+    END IF;
+
+    IF NOT v_sistema AND NOT v_staff THEN
+      IF NEW.cancelamento_tipo IS DISTINCT FROM OLD.cancelamento_tipo THEN
+        IF NEW.cancelamento_tipo = 'payment' THEN
+          RAISE EXCEPTION 'So a cantina pode liquidar reservas'
+            USING ERRCODE = 'RES07';
+        END IF;
+        IF now() >= public.prazo_limite(OLD.tipo, OLD.data) THEN
+          RAISE EXCEPTION 'Prazo ultrapassado para esta refeicao'
+            USING ERRCODE = 'RES06';
+        END IF;
+      END IF;
+
+      -- A dieta segue o prazo do almoco, como no Cluster 3 (F2).
+      IF NEW.is_dieta IS DISTINCT FROM OLD.is_dieta
+         AND now() >= public.prazo_limite(OLD.tipo, OLD.data) THEN
+        RAISE EXCEPTION 'Prazo ultrapassado para alterar a dieta'
+          USING ERRCODE = 'RES06';
+      END IF;
+
+      -- O bloqueio nao vale nada se o proprio aluno o puder desfazer. Mesma
+      -- forma do buraco do 'payment' que o RES07 acima fecha.
+      IF (NEW.cancelamento_tipo IS NULL OR NEW.cancelamento_tipo = 'reactivated')
+         AND public.aluno_bloqueado(OLD.aluno_id) THEN
+        RAISE EXCEPTION 'Tens valores em atraso. Regulariza na cantina.'
+          USING ERRCODE = 'RES11';
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END; $function$;
+
+
+COMMENT ON FUNCTION public.reservas_guard() IS
+  'Guarda de escrita em reservas: deriva preco/tipo/data do menu, congela os '
+  'campos imutaveis, aplica o prazo do servidor a sessoes de aluno, e recusa a '
+  'um aluno bloqueado qualquer escrita que deixe a reserva ativa. '
+  'Cantina e contextos de sistema (auth.uid() IS NULL) passam ao lado.';
+
+-- -----------------------------------------------------------------------------
+-- 3.2 - O reservar_refeicao
+-- -----------------------------------------------------------------------------
+-- A guarda ja o cobre; isto e ERGONOMIA, e mesmo assim nao e opcional. O
+-- ON CONFLICT so reativa linhas em 'user' ou 'contrato', por isso uma linha
+-- 'bloqueado' nao entra la e o fluxo caia no ramo do RES01 - "ja tens uma
+-- reserva para esta refeicao neste dia" - que e verdade e nao serve de nada a
+-- quem precisa de saber que deve dinheiro.
+--
+-- E NAO acrescentar 'bloqueado' aquela lista do ON CONFLICT: isso deixava um
+-- aluno bloqueado reativar a reserva suspensa, que e exatamente o que nao pode
+-- acontecer.
+CREATE OR REPLACE FUNCTION public.reservar_refeicao(p_menu_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  m record;
+  v_estado text;
+BEGIN
+  SELECT id, data, tipo, preco INTO m FROM menus WHERE id = p_menu_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Menu inexistente' USING ERRCODE = 'RES03';
+  END IF;
+
+  IF public.aluno_bloqueado(auth.uid()) THEN
+    RAISE EXCEPTION 'Tens valores em atraso. Regulariza na cantina.'
+      USING ERRCODE = 'RES11';
+  END IF;
+
+  INSERT INTO reservas (aluno_id, menu_id, data, tipo, preco, is_dieta, automatico, cancelamento_tipo)
+  VALUES (auth.uid(), m.id, m.data, m.tipo, m.preco, false, false, NULL)
+  ON CONFLICT (aluno_id, data, tipo) DO UPDATE
+    SET cancelamento_tipo = 'reactivated',
+        menu_id           = EXCLUDED.menu_id,
+        preco             = EXCLUDED.preco
+    WHERE reservas.cancelamento_tipo IN ('user', 'contrato');
+
+  IF NOT FOUND THEN
+    SELECT r.cancelamento_tipo INTO v_estado
+    FROM reservas r
+    WHERE r.aluno_id = auth.uid() AND r.data = m.data AND r.tipo = m.tipo;
+
+    IF v_estado = 'payment' THEN
+      RAISE EXCEPTION 'Esta refeicao ja foi liquidada e nao pode ser reservada de novo'
+        USING ERRCODE = 'RES02';
+    ELSE
+      RAISE EXCEPTION 'Ja tens uma reserva para esta refeicao neste dia'
+        USING ERRCODE = 'RES01';
+    END IF;
+  END IF;
+END; $function$;
+
+-- -----------------------------------------------------------------------------
+-- 3.3 - O almoco automatico de quem esta bloqueado nasce SUSPENSO
+-- -----------------------------------------------------------------------------
+-- E nao "nao nasce". As duas coisas sao iguais para o aluno e para o dinheiro -
+-- a linha esta inativa de qualquer maneira, nao e servida nem cobrada - mas
+-- sao diferentes NO DESBLOQUEIO. Se o alastramento SALTASSE o aluno, um aluno
+-- que paga no dia 20 ficava sem almoco em todos os menus criados enquanto
+-- esteve bloqueado, e a reposicao nao tinha linha nenhuma para repor: era
+-- preciso um enchimento a posteriori, um segundo caminho de codigo, para
+-- reparar um buraco aberto pelo proprio bloqueio.
+--
+-- Desvio ao que foi dito ("nao criar"), aprovado pelo Pedro a 2026-09-13.
+CREATE OR REPLACE FUNCTION public.criar_reservas_automaticas_almoco()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+BEGIN
+  IF NEW.tipo = 'almoco' THEN
+    INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta,
+                          cancelamento_tipo)
+    SELECT a.id, NEW.id, NEW.tipo, NEW.data, NEW.preco, true, false,
+           CASE WHEN public.aluno_bloqueado(a.id) THEN 'bloqueado' ELSE NULL END
+    FROM alunos a
+    WHERE a.tipo_contrato = 'completo'
+    ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+  END IF;
+  RETURN NEW;
+END; $function$;
+
+-- Trigger AFTER INSERT: o NEW.tipo_contrato ja vem com o default aplicado.
+--
+-- Um aluno acabado de inscrever nao tem meses fechados, por isso na pratica
+-- nunca esta bloqueado. Fica na mesma pela uniformidade - e para nao ser uma
+-- surpresa se um dia alguem inserir um aluno com historico.
+CREATE OR REPLACE FUNCTION public.criar_reservas_almoco_novo_aluno()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_local     timestamp := now() AT TIME ZONE 'Europe/Lisbon';
+  v_hoje      date      := v_local::date;
+  v_hora      time      := v_local::time;
+  v_bloqueado text;
+BEGIN
+  IF NEW.tipo_contrato <> 'completo' THEN
+    RETURN NEW;
+  END IF;
+
+  v_bloqueado := CASE WHEN public.aluno_bloqueado(NEW.id) THEN 'bloqueado' END;
+
+  INSERT INTO reservas (aluno_id, menu_id, tipo, data, preco, automatico, is_dieta,
+                        cancelamento_tipo)
+  SELECT NEW.id, m.id, m.tipo, m.data, m.preco, true, false, v_bloqueado
+  FROM menus m
+  WHERE m.tipo = 'almoco'
+    AND (m.data > v_hoje OR (m.data = v_hoje AND v_hora < TIME '09:00'))
+  ON CONFLICT (aluno_id, data, tipo) DO NOTHING;
+
+  RETURN NEW;
+END; $$;
+
+COMMIT;
