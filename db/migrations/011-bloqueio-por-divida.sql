@@ -222,7 +222,8 @@ COMMIT;
 --   Esperado: uma linha, prosecdef = t, e no proacl NEM =X/ (o PUBLIC) NEM anon.
 --
 -- 6) Ninguem esta bloqueado so por isto ter sido aplicado. Numa base sem meses
---    fechados por pagar, tem de dar zero:
+--    fechados por pagar, tem de dar zero. NA ESCOLA, a partir do dia 15, nao da
+--    zero e nao e erro - ver o ponto 11 da VERIFICACAO FINAL, no fim do ficheiro:
 --
 --   SELECT count(*) FROM alunos WHERE aluno_bloqueado(id);
 --
@@ -983,4 +984,115 @@ COMMIT;
 --
 --   SELECT count(*) FROM alunos a WHERE aluno_bloqueado(a.id);
 --   Esperado: o numero de alunos que a lista de Valores Pendentes marca.
+-- =============================================================================
+
+
+-- =============================================================================
+-- VERIFICACAO FINAL - para colar no editor de SQL da escola depois das 7 seccoes
+-- =============================================================================
+-- Tudo o que as verificacoes das seccoes dizem, junto, mais o que so faz
+-- sentido no fim. Correr uma a uma e comparar com o Esperado. As que leem
+-- saldos_por_aluno() tem de ser corridas pela app (como a cantina) ou vistas no
+-- ecra de Valores Pendentes: a funcao recusa uma ligacao sem auth.uid().
+--
+-- ANTES DE APLICAR, apontar os valores de referencia (ver 10):
+--
+--   SELECT coalesce(cancelamento_tipo, '(ativa)') AS estado, count(*), sum(preco)
+--   FROM reservas GROUP BY 1 ORDER BY 1;
+--
+-- 1) Os cinco estados da reserva, e a ativa inalterada:
+--
+--   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+--   WHERE conname = 'reservas_cancelamento_tipo_chk';
+--   Esperado: ARRAY['user', 'payment', 'reactivated', 'contrato', 'bloqueado']
+--
+--   SELECT generation_expression FROM information_schema.columns
+--   WHERE table_name = 'reservas' AND column_name = 'ativa';
+--   Esperado: (cancelamento_tipo IS NULL) OR (cancelamento_tipo = 'reactivated'::text)
+--
+-- 2) Os seis resultados do leitor:
+--
+--   SELECT pg_get_constraintdef(oid) FROM pg_constraint
+--   WHERE conname = 'leituras_resultado_check';
+--   Esperado: servido, sem_reserva, cancelada, repetido, codigo_desconhecido, bloqueado
+--
+-- 3) desbloqueios: RLS ligado, o anon sem nada, o authenticated so com SELECT,
+--    e as duas politicas de leitura:
+--
+--   SELECT relrowsecurity FROM pg_class WHERE oid = 'public.desbloqueios'::regclass;
+--   Esperado: t
+--
+--   SELECT grantee, privilege_type FROM information_schema.role_table_grants
+--   WHERE table_name = 'desbloqueios' AND grantee IN ('anon', 'authenticated');
+--   Esperado: uma linha so, authenticated | SELECT
+--
+--   SELECT policyname, cmd FROM pg_policies WHERE tablename = 'desbloqueios' ORDER BY 1;
+--   Esperado: desbloqueios_aluno_le_os_seus | SELECT e desbloqueios_cantina_le_todos | SELECT
+--
+-- 4) O dia do bloqueio:
+--
+--   SELECT dia_bloqueio FROM configuracao;
+--   Esperado: uma linha, 15
+--
+-- 5) As funcoes que a app chama: SECURITY DEFINER, o authenticated chega-lhes,
+--    o anon e o PUBLIC nao:
+--
+--   SELECT proname, prosecdef, proacl FROM pg_proc
+--   WHERE pronamespace = 'public'::regnamespace
+--     AND proname IN ('aluno_bloqueado', 'alunos_bloqueados',
+--                     'conceder_desbloqueio', 'revogar_desbloqueio')
+--   ORDER BY 1;
+--   Esperado: quatro linhas, prosecdef = t, `authenticated=X` no proacl, e
+--   NEM `anon=` NEM uma entrada a comecar por `=X/` (o PUBLIC).
+--
+-- 6) As tres funcoes internas: ninguem de fora lhes chega, nem o authenticated.
+--    Correm do cron e de dentro das funcoes acima:
+--
+--   SELECT proname, proacl FROM pg_proc
+--   WHERE pronamespace = 'public'::regnamespace
+--     AND proname IN ('suspender_reservas_bloqueadas', 'reativar_reservas_bloqueadas',
+--                     'sincronizar_bloqueios')
+--   ORDER BY 1;
+--   Esperado: tres linhas, e no proacl NEM `authenticated=` NEM `anon=` NEM `=X/`.
+--
+-- 7) As quatro tarefas agendadas:
+--
+--   SELECT jobname, schedule, active FROM cron.job
+--   WHERE jobname IN ('fechar-mes', 'avisos-inicial', 'avisos-atraso', 'bloquear-devedores')
+--   ORDER BY jobname;
+--   Esperado: avisos-atraso 0 8 9 * * | avisos-inicial 0 8 1 * * |
+--             bloquear-devedores 0 2 * * * | fechar-mes 0 1 1 * *, todas active.
+--
+-- 8) OS ACENTOS dos avisos. LER a saida:
+--
+--   SELECT prosrc FROM pg_proc WHERE proname = 'gerar_avisos_pagamento';
+--   Esperado: 'Março', 'até dia 8', 'não', 'Direção' legiveis. "MarA§o" ou
+--   "atA(c)" = ficheiro com dupla codificacao; desfazer e nao usar assim.
+--
+-- 9) A lista de colunas escreviveis na alunos continua exatamente (nome, email).
+--    A 011 nao lhe toca; a 008, a 009 e a 010 estreitaram-na:
+--
+--   SELECT string_agg(column_name, ', ' ORDER BY column_name)
+--   FROM information_schema.column_privileges
+--   WHERE table_name = 'alunos' AND grantee = 'authenticated' AND privilege_type = 'UPDATE';
+--   Esperado: email, nome
+--
+-- 10) NENHUM VALOR SE MOVEU. A consulta de antes, outra vez:
+--
+--   SELECT coalesce(cancelamento_tipo, '(ativa)') AS estado, count(*), sum(preco)
+--   FROM reservas GROUP BY 1 ORDER BY 1;
+--   Esperado: identico ao de antes de aplicar, SE a 011 for aplicada antes do
+--   dia 15. Nao ha 'bloqueado' nenhum ate a tarefa das 02:00 correr.
+--
+-- 11) QUEM FICA BLOQUEADO, e isto NAO e um erro a corrigir:
+--
+--   SELECT a.nome FROM alunos a WHERE aluno_bloqueado(a.id) ORDER BY 1;
+--
+--   Na copia de testes da zero. NA ESCOLA NAO: ha alunos com meses fechados por
+--   pagar. Antes do dia 15 da zero na mesma (o dia ainda nao chegou). No dia 15
+--   ou depois, sao exatamente os alunos em divida sem excecao, e ficam logo sem
+--   poder reservar; as refeicoes deles sao suspensas na tarefa das 02:00 UTC
+--   seguinte, e a partir dai o 10 deixa de dar identico - pelas refeicoes
+--   futuras deles, que passam a 'bloqueado'. Aplicar DEPOIS do dia 15 so com a
+--   cantina a saber que isto acontece nesse mesmo dia.
 -- =============================================================================
