@@ -814,3 +814,129 @@ BEGIN
 END; $function$;
 
 COMMIT;
+
+
+-- =============================================================================
+-- SECCAO 6 - os agendamentos e os textos dos avisos
+-- =============================================================================
+-- O pagamento passa a vencer no DIA 8 (era 10). Muda o texto dos dois avisos, o
+-- dia do segundo aviso (11 -> 9), e entra a tarefa do bloqueio.
+--
+-- Os dois manuais em docs/ dizem dia 10 e mudam com isto.
+--
+-- ATENCAO A CODIFICACAO desta seccao: e a unica com acentos e com o simbolo do
+-- euro, porque as mensagens sao texto que o aluno le. O ficheiro e UTF-8. Se
+-- for acrescentado ou editado por uma ferramenta que leia em ANSI e escreva em
+-- UTF-8 - o Get-Content/Add-Content do PowerShell 5.1 faz exatamente isso - o
+-- texto fica duplamente codificado e o aluno recebe "atA(c) dia 8". Ja
+-- aconteceu uma vez, a 2026-09-13, e so um teste que olha para a mensagem e que
+-- apanha isso.
+BEGIN;
+
+-- Corpo da 004 inteiro, so com as duas datas nos textos. Confirmado contra o
+-- pg_get_functiondef da base viva antes de reescrever.
+CREATE OR REPLACE FUNCTION public.gerar_avisos_pagamento(p_fase text)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  mes_ref date := date_trunc('month', CURRENT_DATE) - INTERVAL '1 month';
+  v_ano   int  := EXTRACT(YEAR  FROM mes_ref);
+  v_mes   int  := EXTRACT(MONTH FROM mes_ref);
+  v_nomes text[] := ARRAY['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                          'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  v_n     int;
+BEGIN
+  -- Desvio 3: sem isto, uma fase mal escrita manda a mensagem da Direcao a toda
+  -- a gente, e em silencio.
+  IF p_fase NOT IN ('inicial','atraso') THEN
+    RAISE EXCEPTION 'Fase invalida: %. Usar inicial ou atraso.', p_fase;
+  END IF;
+
+  INSERT INTO notificacoes (aluno_id, tipo, titulo, mensagem, dados)
+  SELECT md.aluno_id,
+         'pagamento',
+         CASE WHEN p_fase = 'inicial' THEN 'Pagamento em falta'
+                                      ELSE 'Pagamento em atraso' END,
+         CASE WHEN p_fase = 'inicial'
+              THEN format('Tens %s€ por pagar de %s %s. Regulariza na cantina até dia 8.',
+                          to_char(md.total,'FM990D00'), v_nomes[v_mes], v_ano)
+              ELSE format('Continuas com %s€ por pagar de %s %s. Se não pagares até dia 15, segue para a Direção e ficas sem poder usar a cantina.',
+                          to_char(md.total,'FM990D00'), v_nomes[v_mes], v_ano)
+         END,
+         jsonb_build_object('ano', v_ano, 'mes', v_mes, 'total', md.total, 'fase', p_fase)
+  FROM meses_em_divida md
+  WHERE md.ano = v_ano
+    AND md.mes = v_mes
+    -- Quem ja pagou nao leva aviso.
+    AND NOT EXISTS (
+      SELECT 1 FROM meses_liquidados ml
+      WHERE ml.aluno_id = md.aluno_id AND ml.ano = v_ano AND ml.mes = v_mes)
+    -- Desvio 1: e quem ja levou este aviso tambem nao leva outro igual.
+    AND NOT EXISTS (
+      SELECT 1 FROM notificacoes n
+      WHERE n.aluno_id = md.aluno_id
+        AND n.tipo = 'pagamento'
+        AND n.dados->>'fase' = p_fase
+        AND (n.dados->>'ano')::int = v_ano
+        AND (n.dados->>'mes')::int = v_mes);
+
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END; $function$;
+
+-- Tirar por nome e voltar a agendar, como na 004: sem depender da semantica de
+-- upsert do cron.schedule.
+--
+-- A 004 fazia DELETE FROM cron.job. AQUI NAO SERVE: a 004 foi colada no editor
+-- de SQL do Supabase, onde corre com um papel privilegiado, e pelo pooler o
+-- DELETE direto na cron.job da "permission denied for table job". O
+-- cron.unschedule e a API suportada e passa nos dois sitios - na escola, colado
+-- a mao, funciona na mesma.
+--
+-- O IF EXISTS e preciso porque o unschedule rebenta com um nome que nao existe,
+-- e o bloquear-devedores ainda nao existe da primeira vez.
+DO $desagendar$
+DECLARE j text;
+BEGIN
+  FOREACH j IN ARRAY ARRAY['fechar-mes','avisos-inicial','avisos-atraso','bloquear-devedores']
+  LOOP
+    IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = j) THEN
+      PERFORM cron.unschedule(j);
+    END IF;
+  END LOOP;
+END $desagendar$;
+
+SELECT cron.schedule('fechar-mes',     '0 1 1 * *',  $job$ SELECT fechar_mes_anterior(); $job$);
+SELECT cron.schedule('avisos-inicial', '0 8 1 * *',  $job$ SELECT gerar_avisos_pagamento('inicial'); $job$);
+SELECT cron.schedule('avisos-atraso',  '0 8 9 * *',  $job$ SELECT gerar_avisos_pagamento('atraso'); $job$);
+
+-- DIARIA, e nao no dia 15. A tarefa nao decide nada: quem decide e o
+-- aluno_bloqueado, que le o dia_bloqueio da configuracao. Prende-la ao dia 15
+-- era pos uma data no cron a ter de acompanhar uma definicao que pode mudar.
+-- E e nos dois sentidos, por isso tem de correr todos os dias para repor as
+-- refeicoes de quem deixou de estar bloqueado na viragem do mes.
+--
+-- 02:00 UTC = 02:00 ou 03:00 em Lisboa, sempre dentro do dia de Lisboa que esta
+-- a reconciliar, que e o fuso que o aluno_bloqueado le. Correr isto mais cedo
+-- parte essa correspondencia: as 23:00 UTC ja e o dia seguinte em Lisboa.
+SELECT cron.schedule('bloquear-devedores', '0 2 * * *', $job$ SELECT sincronizar_bloqueios(); $job$);
+
+COMMIT;
+
+-- =============================================================================
+-- VERIFICACAO DA SECCAO 6
+-- =============================================================================
+-- 1) Quatro tarefas, com os dias novos:
+--
+--   SELECT jobname, schedule, active FROM cron.job
+--   WHERE jobname IN ('fechar-mes','avisos-inicial','avisos-atraso','bloquear-devedores')
+--   ORDER BY jobname;
+--   Esperado: avisos-atraso 0 8 9 * * | avisos-inicial 0 8 1 * * |
+--             bloquear-devedores 0 2 * * * | fechar-mes 0 1 1 * *, todas active.
+--
+-- 2) OS ACENTOS. Correr isto e LER a saida - nao basta a funcao existir:
+--
+--   SELECT prosrc FROM pg_proc WHERE proname = 'gerar_avisos_pagamento';
+--   Esperado: 'Março', 'até dia 8', 'não', 'Direção' e o simbolo do euro
+--   legiveis. Se aparecer "MarA§o" ou "atA(c)" ou "a,¬", o ficheiro foi
+--   gravado com dupla codificacao - nao aplicar na escola assim.
+-- =============================================================================
