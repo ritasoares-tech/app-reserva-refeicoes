@@ -940,3 +940,47 @@ COMMIT;
 --   legiveis. Se aparecer "MarA§o" ou "atA(c)" ou "a,¬", o ficheiro foi
 --   gravado com dupla codificacao - nao aplicar na escola assim.
 -- =============================================================================
+
+
+-- =============================================================================
+-- SECCAO 7 - quem esta bloqueado, para a lista de Valores Pendentes
+-- =============================================================================
+-- Nao estava no plano, que so dizia "a lista marca os alunos bloqueados". A
+-- forma obvia de o fazer no browser era ler a meses_em_divida inteira e fazer a
+-- conta la - e uma leitura de tabela inteira pelo PostgREST para nas 1000
+-- linhas EM SILENCIO, o defeito ja encontrado tres vezes nesta app (a ultima e
+-- a razao de existir o saldos_por_aluno da 007). A alternativa, uma chamada ao
+-- aluno_bloqueado por aluno, eram ~150 pedidos cada vez que o ecra abre.
+--
+-- Uma funcao, e o MESMO predicado: nao ha segunda definicao de "bloqueado" a
+-- poder divergir da primeira.
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.alunos_bloqueados()
+RETURNS SETOF uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $fn$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina WHERE id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode ver os alunos bloqueados'
+      USING ERRCODE = 'RES04';
+  END IF;
+
+  RETURN QUERY SELECT a.id FROM alunos a WHERE public.aluno_bloqueado(a.id);
+END; $fn$;
+
+COMMENT ON FUNCTION public.alunos_bloqueados() IS
+  'Os ids dos alunos que o aluno_bloqueado da como bloqueados. So a cantina.';
+
+REVOKE EXECUTE ON FUNCTION public.alunos_bloqueados() FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.alunos_bloqueados() TO authenticated;
+
+COMMIT;
+
+-- =============================================================================
+-- VERIFICACAO DA SECCAO 7
+-- =============================================================================
+--   SELECT prosecdef, proacl FROM pg_proc WHERE proname = 'alunos_bloqueados';
+--   Esperado: prosecdef = t, sem `anon=` e sem `=X/postgres`.
+--
+--   SELECT count(*) FROM alunos a WHERE aluno_bloqueado(a.id);
+--   Esperado: o numero de alunos que a lista de Valores Pendentes marca.
+-- =============================================================================
