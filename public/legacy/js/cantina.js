@@ -969,6 +969,9 @@ function _estadoReserva(r){
     case "contrato":    return { texto: "🏷️ Cancelada pela cantina (mudança de contrato)", classe: "status-cancelada" };
     case "payment":     return { texto: "💳 Paga",                 classe: "status-cancelada" };
     case "reactivated": return { texto: "🔄 Reativada",            classe: "status-ativa" };
+    // Suspensa pelo bloqueio (011). Não foi cancelada por ninguém, e volta
+    // quando a dívida for paga ou a cantina levantar o bloqueio.
+    case "bloqueado":   return { texto: "🔒 Suspensa (valores em atraso)", classe: "status-cancelada" };
     default:            return { texto: "✅ Ativa",                classe: "status-ativa" };
   }
 }
@@ -1104,6 +1107,7 @@ function backToHistoricoList() {
 ============================= */
 
 let alunoAtual = null;
+let _alunosBloqueados = new Set();   // ids que o alunos_bloqueados devolve (011)
 
 async function showCantinaSaldos() {
   show("cantinaSaldos");
@@ -1136,6 +1140,13 @@ async function showCantinaSaldos() {
       return;
     }
 
+    // Quem está bloqueado (011), para a cantina ver antes de o aluno chegar ao
+    // balcão. Uma chamada só, e a conta na base de dados pela mesma razão do
+    // saldos_por_aluno acima. Se falhar, a lista mostra-se na mesma sem marca.
+    const { data: bloqueados, error: erroBloqueados } = await supabaseClient.rpc("alunos_bloqueados");
+    if (erroBloqueados) console.warn("Não foi possível ler os alunos bloqueados:", erroBloqueados);
+    _alunosBloqueados = new Set(bloqueados || []);
+
     todosSaldos = data.map(s => ({ id: s.id, nome: s.nome, total: Number(s.total) }));
     saldosFiltrados = [...todosSaldos];
     ordenarSaldos('nome');
@@ -1164,7 +1175,9 @@ function renderizarSaldos() {
   const html = saldosFiltrados
     .map(s => `
       <div class="saldo-linha" onclick="showSaldoAluno('${s.id}')">
-        <span class="saldo-nome">${escapeHtml(s.nome)}</span>
+        <span class="saldo-nome">${escapeHtml(s.nome)}${_alunosBloqueados.has(s.id) ? `
+          <span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:11px;font-weight:700;
+                       background:#fff4e5;color:#b35000;border:1px solid #e8590c;white-space:nowrap;">🔒 Bloqueado</span>` : ""}</span>
         <span class="saldo-valor">${Number(s.total).toFixed(2)}€</span>
       </div>
     `)
@@ -1217,6 +1230,10 @@ async function showSaldoAluno(alunoId) {
   showLoading("⏳ Carregando dados...");
 
   try {
+    // Antes do early return do "Sem dívidas": o painel é sobre o aluno, não
+    // sobre haver meses a mostrar, e uma exceção dada fica visível na mesma.
+    await _renderEstadoBloqueio(alunoId);
+
     const { data: dividas, error } = await supabaseClient
       .rpc('obter_divida_por_mes', { p_aluno_id: alunoId });
 
@@ -1292,6 +1309,126 @@ async function processarDividasEncontradas(alunoId, dividas) {
   const btnLiquidar = document.getElementById("btnLiquidarTotal");
   btnLiquidar.classList.remove("hidden");
   btnLiquidar.style.display = "block";
+}
+
+/* =============================
+   CANTINA — BLOQUEIO POR VALORES EM ATRASO (011)
+============================= */
+
+// O estado do bloqueio no detalhe do aluno. Dois casos, e nunca os dois:
+//  - bloqueado: diz-se, com o botão Desbloquear;
+//  - com exceção este mês: quem a deu, quando e porquê, com o botão Revogar.
+// Se as leituras falharem o painel fica vazio - o resto do ecrã (a dívida e a
+// liquidação) não pode depender disto.
+async function _renderEstadoBloqueio(alunoId){
+  const div = document.getElementById("estadoBloqueio");
+  if(!div) return;
+  div.innerHTML = "";
+
+  const hoje = new Date();
+  const [{ data: bloqueado, error: erroBloqueado }, { data: excecoes }] = await Promise.all([
+    supabaseClient.rpc("aluno_bloqueado", { p_aluno_id: alunoId }),
+    supabaseClient.from("desbloqueios")
+      .select("motivo, criado_em, cantina_responsavel")
+      .eq("aluno_id", alunoId)
+      .eq("ano", hoje.getFullYear())
+      .eq("mes", hoje.getMonth() + 1)
+  ]);
+  if(erroBloqueado){ console.warn("Não foi possível ler o bloqueio:", erroBloqueado); return; }
+
+  const painel = (fundo, borda, cor, conteudo) => `
+    <div style="background:${fundo};border:1px solid ${borda};border-left:4px solid ${borda};border-radius:8px;
+                padding:12px;margin:12px 0;color:${cor};font-size:14px;text-align:left;">
+      ${conteudo}
+    </div>`;
+
+  if(bloqueado){
+    div.innerHTML = painel("#fff4e5", "#e8590c", "#7a3a00", `
+      <b>🔒 Bloqueado — valores em atraso</b><br>
+      Não pode reservar nem ser servido, e as refeições marcadas estão suspensas até pagar.
+      <button class="btn-full" style="margin-top:10px;" onclick="desbloquearAluno('${alunoId}')">🔓 Desbloquear</button>
+    `);
+    return;
+  }
+
+  const excecao = excecoes && excecoes[0];
+  if(!excecao) return;
+
+  let quem = "a cantina";
+  const { data: responsavel } = await supabaseClient
+    .from("cantina").select("nome").eq("id", excecao.cantina_responsavel).maybeSingle();
+  if(responsavel && responsavel.nome) quem = responsavel.nome;
+
+  div.innerHTML = painel("#e7f5ec", "#2e7d32", "#1e5b24", `
+    <b>🔓 Desbloqueado até ao fim do mês</b><br>
+    Por ${escapeHtml(quem)} em ${new Date(excecao.criado_em).toLocaleDateString("pt-PT")}.<br>
+    Motivo: ${escapeHtml(excecao.motivo)}
+    <button class="btn-full" style="margin-top:10px;" onclick="revogarDesbloqueio('${alunoId}')">Revogar</button>
+  `);
+}
+
+function _refeicoes(n, participio){
+  return `${n} ${n === 1 ? "refeição" : "refeições"} ${n === 1 ? participio : participio + "s"}`;
+}
+
+async function desbloquearAluno(alunoId){
+  const r = await showModal({
+    icon: "🔓",
+    type: "warning",
+    title: "Desbloquear Aluno",
+    message: "O aluno volta a poder reservar e ser servido até ao fim do mês, com a dívida por pagar. As refeições suspensas voltam já.",
+    fields: [
+      { id: "motivo", type: "textarea", label: "Motivo", required: true }
+    ],
+    buttons: [
+      { text: "Voltar",      type: "secondary", resolve: false },
+      { text: "Desbloquear", type: "primary",   resolve: true  }
+    ]
+  });
+  if(!r) return;   // null = Voltar ou clique fora
+
+  showLoading("⏳ A desbloquear...");
+  try {
+    const { data, error } = await supabaseClient
+      .rpc("conceder_desbloqueio", { p_aluno_id: alunoId, p_motivo: r.motivo });
+    hideLoading();
+    if(error){
+      await mostrarErro("Erro ao Desbloquear", error.message || "Erro inesperado");
+      return;
+    }
+    const n = Number(data) || 0;
+    await mostrarSucesso("Aluno Desbloqueado",
+      n > 0 ? `Bloqueio levantado. ${_refeicoes(n, "reposta")}.` : "Bloqueio levantado. Não havia refeições suspensas.");
+    showSaldoAluno(alunoId);
+  } catch(err){
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao desbloquear");
+  } finally {
+    hideLoading();
+  }
+}
+
+async function revogarDesbloqueio(alunoId){
+  if(!await confirmar("Revogar Desbloqueio",
+    "O aluno volta a ficar bloqueado e as refeições futuras voltam a ficar suspensas. Confirmas?")) return;
+
+  showLoading("⏳ A revogar...");
+  try {
+    const { data, error } = await supabaseClient
+      .rpc("revogar_desbloqueio", { p_aluno_id: alunoId });
+    hideLoading();
+    if(error){
+      await mostrarErro("Erro ao Revogar", error.message || "Erro inesperado");
+      return;
+    }
+    const n = Number(data) || 0;
+    await mostrarSucesso("Desbloqueio Revogado",
+      n > 0 ? `${_refeicoes(n, "suspensa")}.` : "Nenhuma refeição para suspender.");
+    showSaldoAluno(alunoId);
+  } catch(err){
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao revogar");
+  } finally {
+    hideLoading();
+  }
 }
 
 // Função de fallback caso a nova função não exista
@@ -1859,6 +1996,22 @@ async function alterarReservaDireto(reservaId, decisao){
 let _leitorTipo = null;
 let _leitorHistorico = [];
 
+// O resultado de uma leitura em palavras, para a lista da sessão e para o
+// Excel. Antes saía o código cru ('sem_reserva'); com o sexto resultado (011)
+// passou a haver um mapa, e um valor desconhecido continua a sair cru em vez
+// de em branco.
+const _ROTULOS_LEITURA = {
+  servido:             "Servido",
+  sem_reserva:         "Sem reserva",
+  cancelada:           "Reserva cancelada",
+  repetido:            "Repetido",
+  codigo_desconhecido: "Código desconhecido",
+  bloqueado:           "Bloqueado (valores em atraso)"
+};
+function _rotuloLeitura(resultado){
+  return _ROTULOS_LEITURA[resultado] || resultado || "?";
+}
+
 // A refeição escolhe-se UMA vez e fica visível em grande o tempo todo. Um turno
 // esquecido depois do pequeno-almoço tem de saltar à vista aqui, e não ser
 // descoberto na exportação uma semana depois.
@@ -1951,7 +2104,10 @@ async function _leitorProcessar(codigo){
     sem_reserva:         { cor:"#c62828", icone:"⛔", texto:"SEM RESERVA" },
     cancelada:           { cor:"#c62828", icone:"⛔", texto:"RESERVA CANCELADA" },
     repetido:            { cor:"#f9a825", icone:"⚠️", texto:"JÁ TINHA SIDO SERVIDO" },
-    codigo_desconhecido: { cor:"#c62828", icone:"❓", texto:"CÓDIGO DESCONHECIDO" }
+    codigo_desconhecido: { cor:"#c62828", icone:"❓", texto:"CÓDIGO DESCONHECIDO" },
+    // Cor própria e não o vermelho do sem_reserva: ao balcão tem de se perceber
+    // de relance que é dinheiro, e não uma reserva que falta (011).
+    bloqueado:           { cor:"#4a148c", icone:"🔒", texto:"BLOQUEADO — VALORES EM ATRASO" }
   };
   const e = cores[r.resultado] || { cor:"#666", icone:"❓", texto:escapeHtml(r.resultado || "?") };
 
@@ -1970,7 +2126,7 @@ async function _leitorProcessar(codigo){
   document.getElementById("leitorHistorico").innerHTML = _leitorHistorico
     .slice(0, 5)
     .map(h => `<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:14px;">
-        ${escapeHtml(h.nome)} — ${escapeHtml(h.resultado)}</div>`)
+        ${escapeHtml(h.nome)} — ${escapeHtml(_rotuloLeitura(h.resultado))}</div>`)
     .join("");
 
   document.getElementById("leitorInput").focus();
@@ -2013,7 +2169,7 @@ async function exportarLeiturasExcel(){
       formatarTipoRefeicao(l.tipo),
       l.alunos ? l.alunos.nome : "(desconhecido)",
       l.codigo_lido,
-      l.resultado
+      _rotuloLeitura(l.resultado)
     ]);
   });
 
