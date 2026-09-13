@@ -28,10 +28,81 @@ function _precoNovaMarcacao(tipo, precoMenu){
     : Number(precoMenu);
 }
 
+// ---------------------------------------------------------------
+// BLOQUEIO POR VALORES EM ATRASO (011)
+// Quem decide é a base de dados (aluno_bloqueado); o ecrã só tem de o dizer
+// ANTES do clique, porque um bloqueio calado lê-se como a app estar avariada.
+// Lido de novo em cada passagem pelos dois ecrãs e não uma vez por sessão: o
+// bloqueio pode cair (ou levantar-se) com o aluno já dentro da app.
+//
+// Se a leitura falhar fica-se sem aviso, e não com tudo trancado: a guarda do
+// servidor continua a recusar, e o RES11 tem mensagem própria.
+let _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0 };
+
+async function _carregarBloqueio(alunoId){
+  _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0 };
+
+  const { data: bloqueado, error } = await supabaseClient
+    .rpc("aluno_bloqueado", { p_aluno_id: alunoId });
+  if(error){ console.warn("Não foi possível ler o bloqueio:", error); return; }
+
+  const hoje = new Date();
+  const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
+
+  // A exceção da cantina só se procura em quem não está bloqueado - é a única
+  // razão para um aluno com dívida conseguir marcar.
+  let excecao = false;
+  if(!bloqueado){
+    const { data: desbloqueios } = await supabaseClient
+      .from("desbloqueios").select("id")
+      .eq("aluno_id", alunoId).eq("ano", ano).eq("mes", mes);
+    excecao = !!(desbloqueios && desbloqueios.length);
+    if(!excecao) return;
+  }
+
+  // O valor em atraso pela mesma definição do aluno_bloqueado: meses FECHADOS
+  // (antes do mês corrente) sem liquidação. São poucas linhas por aluno.
+  const [{ data: dividas }, { data: liquidados }] = await Promise.all([
+    supabaseClient.from("meses_em_divida").select("ano, mes, total").eq("aluno_id", alunoId),
+    supabaseClient.from("meses_liquidados").select("ano, mes").eq("aluno_id", alunoId)
+  ]);
+  const pagos = new Set((liquidados || []).map(l => `${l.ano}-${l.mes}`));
+  const divida = (dividas || [])
+    .filter(d => d.ano * 12 + d.mes < ano * 12 + mes && !pagos.has(`${d.ano}-${d.mes}`))
+    .reduce((s, d) => s + Number(d.total), 0);
+
+  // Uma exceção que sobrou depois de o aluno pagar não explica nada: não se diz.
+  _bloqueio = { bloqueado: !!bloqueado, desbloqueado: excecao && divida > 0, divida };
+}
+
+function _avisoBloqueio(){
+  if(_bloqueio.bloqueado){
+    const valor = _bloqueio.divida > 0 ? `Tens ${formatCurrency(_bloqueio.divida)} em atraso.` : "Tens valores em atraso.";
+    return `
+      <div style="background:#fff4e5;border:1px solid #f5c08a;border-left:4px solid #e8590c;border-radius:6px;
+                  padding:12px;margin-bottom:14px;color:#7a3a00;font-size:14px;text-align:left;">
+        🔒 <b>${valor}</b><br>
+        Enquanto não pagares não podes reservar refeições nem usar a cantina, e as refeições que tinhas marcadas ficam suspensas.
+        Regulariza na cantina e voltam todas.
+      </div>`;
+  }
+  if(_bloqueio.desbloqueado){
+    return `
+      <div style="background:#e7f5ec;border:1px solid #a8d5b8;border-left:4px solid #2e7d32;border-radius:6px;
+                  padding:12px;margin-bottom:14px;color:#1e5b24;font-size:14px;text-align:left;">
+        🔓 A cantina levantou o bloqueio até ao fim do mês.
+      </div>`;
+  }
+  return "";
+}
+
+const _BOTAO_BLOQUEADO = `<button style="opacity:0.5; cursor:not-allowed;" disabled>🔒 Valores em atraso</button>`;
+
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
 let _reservasAtivasMenu = {};      // menu_id -> { automatico } (já reservado pelo aluno)
 let _reservasCanceladasMenu = {};  // menu_id -> { preco, tipo } (cancelado por si ou pela cantina; permite "Voltar a Reservar")
+let _reservasSuspensasMenu = {};   // menu_id -> true (suspensa pelo bloqueio - não foi o aluno, 011)
 let _alunoTemContrato = true;         // lido em showAlunoMenu; true é o comportamento de sempre (008)
 let _precoAlmocoSemContrato = null;   // configuracao.preco_almoco_sem_contrato (008)
 let _mesMenuView = null;           // primeiro dia do mês em visualização
@@ -71,12 +142,15 @@ async function showAlunoMenu() {
     // reservar_refeicao reativa ambas.
     _reservasAtivasMenu = {};
     _reservasCanceladasMenu = {};
+    _reservasSuspensasMenu = {};
     reservas?.forEach(r => {
       if(r.ativa) _reservasAtivasMenu[r.menu_id] = { automatico: !!r.automatico };
       else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = { preco: Number(r.preco), tipo: r.cancelamento_tipo };
+      else if(r.cancelamento_tipo === "bloqueado") _reservasSuspensasMenu[r.menu_id] = true;
     });
 
     await _carregarTipoAluno(aluno.id);
+    await _carregarBloqueio(aluno.id);
 
     // Mês inicial: o do primeiro menu disponível, senão o atual
     if(!_mesMenuView){
@@ -180,6 +254,7 @@ function renderCalendarioMenu(){
   }
 
   container.innerHTML = `
+    ${_avisoBloqueio()}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <button class="cal-nav" onclick="mudarMesMenu(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES[mes]} ${ano}</b>
@@ -290,22 +365,26 @@ function _cartoesReservaDia(iso){
     const mensagemHorario = regra.mensagem;
     const foiCancelada = _reservasCanceladasMenu[m.id];
     const rotuloBotao = foiCancelada ? "Voltar a Reservar" : "Reservar";
-    const notaCancelada = !foiCancelada ? "" : foiCancelada.tipo === "contrato"
+    const notaCancelada = _reservasSuspensasMenu[m.id]
+      ? `<br><span style="color:#b35000;font-size:12px;">🔒 Suspensa — valores em atraso</span>`
+      : !foiCancelada ? "" : foiCancelada.tipo === "contrato"
       ? `<br><span style="color:#856404;font-size:12px;">🏷️ Cancelada pela cantina (mudança de contrato)</span>`
       : `<br><span style="color:#c62828;font-size:12px;">❌ Cancelaste esta reserva</span>`;
 
+    // O prazo ganha ao bloqueio: o prazo nunca se levanta, o bloqueio sim, e
+    // dizer "paga e podes reservar" de um jantar fora de prazo seria mentira.
     return `
       <div class="menu">
         ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
         ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})${mensagemHorario}
         ${notaCancelada}
         <br>
-        ${podeReservar ? `
+        ${!podeReservar ? `
+          <button style="opacity:0.5; cursor:not-allowed;" disabled>❌ Prazo expirado</button>
+        ` : _bloqueio.bloqueado ? _BOTAO_BLOQUEADO : `
           <button onclick="reservarAluno('${m.id}', '${m.data}', '${m.tipo}')">
             ${rotuloBotao}
           </button>
-        ` : `
-          <button style="opacity:0.5; cursor:not-allowed;" disabled>❌ Prazo expirado</button>
         `}
       </div>
     `;
@@ -315,6 +394,8 @@ function _cartoesReservaDia(iso){
 /* ==============================
    ALUNO — RESERVAR MENU
 ============================== */
+
+const _MENSAGEM_RES11 = "Tens valores em atraso e por isso já não é possível reservar. Regulariza na cantina.";
 
 async function reservarAluno(menuId, data, tipo) {
   try {
@@ -376,6 +457,12 @@ async function reservarAluno(menuId, data, tipo) {
           "Refeição já liquidada",
           "Esta refeição já foi paga e não pode ser reservada de novo. Fala com a cantina."
         );
+      } else if (error.code === "RES11") {
+        // O bloqueio caiu entre o ecrã ser desenhado e o clique. Volta-se ao
+        // mesmo ecrã, que agora já mostra o aviso e os botões trancados.
+        await mostrarErro("Valores em atraso", _MENSAGEM_RES11);
+        showAlunoMenu();
+        return;
       } else {
         handleError(error, "Erro ao criar reserva");
         return;
@@ -433,6 +520,7 @@ async function showAlunoReservas(){
     }
 
     await _carregarTipoAluno(aluno.id);
+    await _carregarBloqueio(aluno.id);
 
     _reservasAluno = reservas || [];
 
@@ -494,6 +582,11 @@ function _badgeRefeicao(r){
   // cancelamento_tipo, não aparecer riscada.
   if(r && (r.cancelamento_tipo === "user" || r.cancelamento_tipo === "payment" || r.cancelamento_tipo === "contrato")){
     return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:#f0f0f0;color:#999;text-decoration:line-through;margin:1px;">${m.txt}</span>`;
+  }
+  // Suspensa pelo bloqueio (011): não foi cancelada por ninguém, está retida.
+  // Cor própria e sem risco, para não se ler como um cancelamento do aluno.
+  if(r && r.cancelamento_tipo === "bloqueado"){
+    return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:#ffe8cc;color:#b35000;border:1px dashed #e8590c;margin:1px;">${m.txt}</span>`;
   }
   return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:${m.bg};color:${m.cor};margin:1px;">${m.txt}</span>`;
 }
@@ -702,6 +795,10 @@ function _cartaoReserva(r, ctx){
     statusBg = "#e7d4f5"; statusBorda = "#6f42c1"; statusTexto = "💳 Paga (liquidação do mês)"; statusCor = "#6f42c1";
   } else if(r.cancelamento_tipo === "reactivated"){
     statusBg = "#d1ecf1"; statusBorda = "#0c5460"; statusTexto = "🔄 Reativada"; statusCor = "#0c5460";
+  } else if(r.cancelamento_tipo === "bloqueado"){
+    // Suspensa pelo bloqueio (011). Não é do aluno e não gasta os dois
+    // cancelamentos do mês; volta sozinha quando a dívida for paga.
+    statusBg = "#fff4e5"; statusBorda = "#e8590c"; statusTexto = "🔒 Suspensa — valores em atraso"; statusCor = "#b35000";
   }
 
   return `
@@ -733,11 +830,15 @@ function _cartaoReserva(r, ctx){
           Cancelar Reserva
         </button>
       ` : ""}
-      ${(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") && dentroPrazo ? `
+      ${(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") && dentroPrazo ? (_bloqueio.bloqueado ? `
+        <button disabled style="margin-top:8px; width:100%; padding:8px; background:#6c757d; color:white; border:none; border-radius:4px; opacity:0.6; cursor:not-allowed; font-weight:bold;">
+          🔒 Valores em atraso
+        </button>
+      ` : `
         <button onclick="reativarReserva('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
           Voltar a Reservar
         </button>
-      ` : ""}
+      `) : ""}
       ${mostrarAvisoLimite ? `
         ${pedido ? `
           <div style="margin-top:8px; padding:8px; border-radius:4px; font-size:13px; font-weight:bold; ${
@@ -905,6 +1006,12 @@ async function reativarReserva(reservaId) {
 
     if (error) {
       hideLoading();
+      if (error.code === "RES11") {
+        // Mesma corrida que no reservarAluno: o bloqueio caiu depois do render.
+        await mostrarErro("Valores em atraso", _MENSAGEM_RES11);
+        showAlunoReservas();
+        return;
+      }
       const mensagemErro = error?.message || "Erro ao reativar reserva";
       await mostrarErro("Erro ao Reativar Reserva", mensagemErro);
       return;
