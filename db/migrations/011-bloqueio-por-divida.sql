@@ -12,8 +12,10 @@
 --   regularizar". Tudo o resto ou ja estava feito ou ficou de fora - ver
 --   docs/propostas-cantina-2026-27.md.
 --
---   O pagamento vence no dia 8, mas o bloqueio so entra no dia 15: e uma folga
---   de uma semana para o que possa ter corrido mal pelo meio. Apanha as TRES
+--   O pagamento vence no dia 8, mas o bloqueio pelo mes anterior so entra no
+--   dia 15: e uma folga de uma semana para o que possa ter corrido mal pelo
+--   meio. Uma divida de ha dois meses ou mais ja teve essa folga e bloqueia
+--   todos os dias. Apanha as TRES
 --   refeicoes, dos dois lados - o aluno nao marca e o leitor recusa, dizendo
 --   que e a divida e nao a falta de reserva.
 --
@@ -75,8 +77,9 @@ ALTER TABLE public.configuracao
   CHECK (dia_bloqueio BETWEEN 1 AND 28);
 
 COMMENT ON COLUMN public.configuracao.dia_bloqueio IS
-  'Dia do mes a partir do qual quem tem meses fechados por pagar fica '
-  'bloqueado. O pagamento vence no dia 8; o 15 e a folga acordada.';
+  'Dia do mes a partir do qual quem tem o mes ANTERIOR por pagar fica '
+  'bloqueado. Meses mais antigos bloqueiam todos os dias. O pagamento vence '
+  'no dia 8; o 15 e a folga acordada.';
 
 -- -----------------------------------------------------------------------------
 -- 1.3 - A excecao manual da cantina
@@ -90,9 +93,11 @@ COMMENT ON COLUMN public.configuracao.dia_bloqueio IS
 -- EXISTS. Uma coluna na alunos respondia ao mesmo com o mesmo custo e PERDIA
 -- QUEM AUTORIZOU E PORQUE, que e a unica razao para deixar passar uma divida.
 --
--- Nao ha coluna de validade e nao ha tarefa de limpeza: como o bloqueio so
--- morde a partir do dia_bloqueio, a caducidade trata-se sozinha. No dia 1
--- ninguem esta bloqueado, e ate ao dia 15 a cantina renova se quiser.
+-- Nao ha coluna de validade e nao ha tarefa de limpeza: o predicado so olha
+-- para a linha do mes corrente, por isso a excecao caduca sozinha no dia 1.
+-- ATENCAO a consequencia: no dia 1 a divida que a excecao cobria passa a ter
+-- dois meses, e isso bloqueia logo, sem esperar pelo dia 15. Se o acordo se
+-- mantiver, a cantina tem de renovar a excecao logo no inicio do mes.
 CREATE TABLE public.desbloqueios (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   aluno_id            uuid NOT NULL REFERENCES public.alunos(id)  ON DELETE CASCADE,
@@ -133,20 +138,24 @@ CREATE POLICY desbloqueios_cantina_le_todos ON public.desbloqueios
 -- -----------------------------------------------------------------------------
 -- 1.4 - O predicado
 -- -----------------------------------------------------------------------------
--- Tres condicoes:
---   1. existe um mes FECHADO por pagar;
---   2. hoje ja e o dia_bloqueio ou depois;
---   3. a cantina nao deu excecao este mes.
+-- Bloqueado quando a cantina nao deu excecao este mes E:
+--   a) existe um mes por pagar de ha DOIS meses ou mais - todos os dias; OU
+--   b) o mes ANTERIOR esta por pagar e hoje ja e o dia_bloqueio ou depois.
 --
--- A primeira e COPIADA A LETRA do CTE 'passados' do obter_divida_por_mes (001),
+-- A semana de tolerancia (do dia 8 ao 15) e para pagar o mes anterior e so
+-- esse. Uma divida mais antiga ja teve a sua: sem a condicao a), um aluno que
+-- nunca paga ficava desbloqueado do dia 1 ao 14 de cada mes, a acumular mais
+-- divida. Regra do Pedro, 2026-09-13, depois de o resto da 011 estar feito.
+--
+-- "Por pagar" e COPIADO A LETRA do CTE 'passados' do obter_divida_por_mes (001),
 -- para que as duas nunca possam discordar sobre o que e uma divida. O mes
 -- corrente esta deliberadamente de fora: ninguem esta em divida pelas refeicoes
 -- que esta a comer este mes.
 --
--- ATENCAO AOS DOIS RELOGIOS, e e de proposito. A condicao 1 usa CURRENT_DATE
--- porque e assim que esta no obter_divida_por_mes e no fechar_mes_anterior, e
--- alinhar so aqui punha as duas definicoes de "mes corrente" a divergir. As
--- condicoes 2 e 3 sao novas e usam a data de Lisboa, como o prazo_limite (003)
+-- ATENCAO AOS DOIS RELOGIOS, e e de proposito. O "por pagar" e os limites dos
+-- meses usam CURRENT_DATE porque e assim que esta no obter_divida_por_mes e no
+-- fechar_mes_anterior, e alinhar so aqui punha as duas definicoes de "mes
+-- corrente" a divergir. O dia do bloqueio e a excecao sao novos e usam a data de Lisboa, como o prazo_limite (003)
 -- e o registar_leitura (009). A diferenca entre as duas e a primeira hora do
 -- dia 1 no verao. NAO "corrigir" uma para a outra sem mexer nas tres funcoes.
 --
@@ -154,18 +163,26 @@ CREATE POLICY desbloqueios_cantina_le_todos ON public.desbloqueios
 -- SELECT na meses_em_divida.
 CREATE OR REPLACE FUNCTION public.aluno_bloqueado(p_aluno_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $fn$
-  SELECT EXISTS (
-           SELECT 1
-           FROM meses_em_divida md
-           WHERE md.aluno_id = p_aluno_id
-             AND make_date(md.ano, md.mes, 1) < date_trunc('month', CURRENT_DATE)::date
-             AND NOT EXISTS (
-                   SELECT 1 FROM meses_liquidados ml
-                   WHERE ml.aluno_id = md.aluno_id
-                     AND ml.ano = md.ano AND ml.mes = md.mes)
+  WITH por_pagar AS (
+    SELECT make_date(md.ano, md.mes, 1) AS mes
+    FROM meses_em_divida md
+    WHERE md.aluno_id = p_aluno_id
+      AND make_date(md.ano, md.mes, 1) < date_trunc('month', CURRENT_DATE)::date
+      AND NOT EXISTS (
+            SELECT 1 FROM meses_liquidados ml
+            WHERE ml.aluno_id = md.aluno_id
+              AND ml.ano = md.ano AND ml.mes = md.mes)
+  )
+  SELECT (
+           -- a) ha dois meses ou mais: sem tolerancia
+           EXISTS (SELECT 1 FROM por_pagar
+                   WHERE mes < (date_trunc('month', CURRENT_DATE) - INTERVAL '1 month')::date)
+           -- b) o mes anterior, so a partir do dia do bloqueio
+        OR (    EXISTS (SELECT 1 FROM por_pagar
+                        WHERE mes = (date_trunc('month', CURRENT_DATE) - INTERVAL '1 month')::date)
+            AND EXTRACT(DAY FROM (now() AT TIME ZONE 'Europe/Lisbon'))::int
+                  >= (SELECT c.dia_bloqueio FROM configuracao c))
          )
-     AND EXTRACT(DAY FROM (now() AT TIME ZONE 'Europe/Lisbon'))::int
-           >= (SELECT c.dia_bloqueio FROM configuracao c)
      AND NOT EXISTS (
            SELECT 1
            FROM desbloqueios d
@@ -176,8 +193,8 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
 $fn$;
 
 COMMENT ON FUNCTION public.aluno_bloqueado(uuid) IS
-  'Verdadeiro quando o aluno tem um mes fechado por pagar, ja passou o '
-  'dia_bloqueio, e a cantina nao lhe deu excecao este mes.';
+  'Verdadeiro quando a cantina nao deu excecao este mes e o aluno tem por '
+  'pagar um mes de ha dois meses ou mais, ou o mes anterior depois do dia_bloqueio.';
 
 -- A licao da 004, 005 e 006 aplicada a nascenca, como na 007.
 REVOKE EXECUTE ON FUNCTION public.aluno_bloqueado(uuid) FROM PUBLIC, anon;
@@ -222,7 +239,7 @@ COMMIT;
 --   Esperado: uma linha, prosecdef = t, e no proacl NEM =X/ (o PUBLIC) NEM anon.
 --
 -- 6) Ninguem esta bloqueado so por isto ter sido aplicado. Numa base sem meses
---    fechados por pagar, tem de dar zero. NA ESCOLA, a partir do dia 15, nao da
+--    fechados por pagar, tem de dar zero. NA ESCOLA nao da
 --    zero e nao e erro - ver o ponto 11 da VERIFICACAO FINAL, no fim do ficheiro:
 --
 --   SELECT count(*) FROM alunos WHERE aluno_bloqueado(id);
@@ -306,11 +323,14 @@ COMMENT ON FUNCTION public.reativar_reservas_bloqueadas(uuid) IS
 -- -----------------------------------------------------------------------------
 -- 2.3 - A reconciliacao diaria, NOS DOIS SENTIDOS
 -- -----------------------------------------------------------------------------
--- O sentido de volta nao e um extra. Sem ele fica um buraco real: um aluno que
--- nunca paga DEIXA DE ESTAR BLOQUEADO no dia 1 - o dia e menor que o
--- dia_bloqueio - e ninguem lhe repoe as refeicoes suspensas, porque nao pagou e
--- nao teve excecao, e nenhum dos dois chamadores da reposicao dispara. Voltava
--- a poder marcar com as marcacoes que ja tinha mortas.
+-- O sentido de volta nao e um extra. Um aluno pode deixar de estar bloqueado
+-- sem pagar e sem excecao - o dia_bloqueio mudado para mais tarde, um mes
+-- liquidado por outro caminho que nao o liquidar_mes_divida, a divida corrigida
+-- a mao - e nenhum dos dois chamadores da reposicao dispara. Sem isto voltava a
+-- poder marcar com as marcacoes que ja tinha mortas. (Quando isto foi escrito o
+-- caso principal era o dia 1, em que um aluno que nunca pagava deixava de estar
+-- bloqueado; com a regra de 2026-09-13 uma divida de dois meses ja nao tem
+-- folga e esse caso deixou de existir.)
 --
 -- Diaria, e nao no dia 15: assim nao ha um dia no cron para manter alinhado com
 -- o dia_bloqueio, que e uma definicao e pode mudar. Idempotente - quem ja esta
@@ -1081,18 +1101,27 @@ COMMIT;
 --
 --   SELECT coalesce(cancelamento_tipo, '(ativa)') AS estado, count(*), sum(preco)
 --   FROM reservas GROUP BY 1 ORDER BY 1;
---   Esperado: identico ao de antes de aplicar, SE a 011 for aplicada antes do
---   dia 15. Nao ha 'bloqueado' nenhum ate a tarefa das 02:00 correr.
+--   Esperado: identico ao de antes de aplicar, ate a tarefa das 02:00 correr -
+--   nao ha 'bloqueado' nenhum antes disso. Depois, ver 11.
 --
 -- 11) QUEM FICA BLOQUEADO, e isto NAO e um erro a corrigir:
 --
 --   SELECT a.nome FROM alunos a WHERE aluno_bloqueado(a.id) ORDER BY 1;
 --
---   Na copia de testes da zero. NA ESCOLA NAO: ha alunos com meses fechados por
---   pagar. Antes do dia 15 da zero na mesma (o dia ainda nao chegou). No dia 15
---   ou depois, sao exatamente os alunos em divida sem excecao, e ficam logo sem
---   poder reservar; as refeicoes deles sao suspensas na tarefa das 02:00 UTC
---   seguinte, e a partir dai o 10 deixa de dar identico - pelas refeicoes
---   futuras deles, que passam a 'bloqueado'. Aplicar DEPOIS do dia 15 so com a
---   cantina a saber que isto acontece nesse mesmo dia.
+--   Na copia de testes da zero. NA ESCOLA NAO, e em QUALQUER DIA do mes: todo o
+--   aluno com um mes por pagar de ha dois meses ou mais fica bloqueado no
+--   momento em que a 011 e aplicada; e a partir do dia 15 juntam-se os que so
+--   devem o mes anterior. Ficam logo sem poder reservar; as refeicoes deles sao
+--   suspensas na tarefa das 02:00 UTC seguinte, e a partir dai o 10 deixa de dar
+--   identico - pelas refeicoes futuras deles, que passam a 'bloqueado'. A
+--   cantina tem de saber, ANTES de aplicar, quem vai ficar bloqueado. Com a 011
+--   ainda por aplicar, a lista sai daqui (o mes anterior so conta a partir do
+--   dia 15; os mais antigos contam sempre):
+--
+--   SELECT a.nome, md.ano, md.mes, md.total
+--   FROM meses_em_divida md JOIN alunos a ON a.id = md.aluno_id
+--   WHERE make_date(md.ano, md.mes, 1) < date_trunc('month', CURRENT_DATE)::date
+--     AND NOT EXISTS (SELECT 1 FROM meses_liquidados ml
+--                     WHERE ml.aluno_id = md.aluno_id AND ml.ano = md.ano AND ml.mes = md.mes)
+--   ORDER BY a.nome, md.ano, md.mes;
 -- =============================================================================
