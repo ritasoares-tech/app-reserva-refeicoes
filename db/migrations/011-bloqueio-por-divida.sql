@@ -638,3 +638,179 @@ BEGIN
 END; $$;
 
 COMMIT;
+
+
+-- =============================================================================
+-- SECCAO 4 - as duas RPC da cantina
+-- =============================================================================
+BEGIN;
+
+-- -----------------------------------------------------------------------------
+-- 4.1 - Conceder
+-- -----------------------------------------------------------------------------
+-- A cantina pode chegar a acordo com um aluno, ou aceitar uma explicacao, e
+-- levantar o bloqueio COM A DIVIDA POR PAGAR. Vale o mes corrente.
+--
+-- ON CONFLICT DO UPDATE, e nao DO NOTHING: dar outra vez no mesmo mes e
+-- corrigir a razao, nao um erro. Guarda sempre quem autorizou.
+--
+-- Devolve quantas refeicoes voltaram, que e o que o ecra mostra a cantina.
+CREATE OR REPLACE FUNCTION public.conceder_desbloqueio(p_aluno_id uuid, p_motivo text)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE v_hoje date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina WHERE id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode desbloquear alunos'
+      USING ERRCODE = 'RES04';
+  END IF;
+
+  INSERT INTO desbloqueios (aluno_id, ano, mes, motivo, cantina_responsavel)
+  VALUES (p_aluno_id,
+          EXTRACT(YEAR  FROM v_hoje)::int,
+          EXTRACT(MONTH FROM v_hoje)::int,
+          p_motivo, auth.uid())
+  ON CONFLICT (aluno_id, ano, mes) DO UPDATE
+    SET motivo              = EXCLUDED.motivo,
+        cantina_responsavel = EXCLUDED.cantina_responsavel,
+        criado_em           = now();
+
+  RETURN public.reativar_reservas_bloqueadas(p_aluno_id);
+END; $fn$;
+
+COMMENT ON FUNCTION public.conceder_desbloqueio(uuid, text) IS
+  'A cantina levanta o bloqueio de um aluno para o mes corrente, com a divida '
+  'por pagar. Repoe logo as refeicoes suspensas e devolve quantas.';
+
+-- -----------------------------------------------------------------------------
+-- 4.2 - Revogar
+-- -----------------------------------------------------------------------------
+-- Apaga a excecao do mes corrente E VOLTA A SUSPENDER JA. Sem a segunda metade,
+-- revogar nao fazia nada visivel ate a tarefa da madrugada seguinte, que nao e
+-- o que a palavra quer dizer.
+--
+-- Devolve quantas refeicoes voltaram a ser suspensas. Zero e uma resposta
+-- legitima: o aluno pode ja ter pago entretanto.
+CREATE OR REPLACE FUNCTION public.revogar_desbloqueio(p_aluno_id uuid)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $fn$
+DECLARE v_hoje date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina WHERE id = auth.uid()) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode desbloquear alunos'
+      USING ERRCODE = 'RES04';
+  END IF;
+
+  DELETE FROM desbloqueios
+   WHERE aluno_id = p_aluno_id
+     AND ano = EXTRACT(YEAR  FROM v_hoje)::int
+     AND mes = EXTRACT(MONTH FROM v_hoje)::int;
+
+  RETURN public.suspender_reservas_bloqueadas(p_aluno_id);
+END; $fn$;
+
+COMMENT ON FUNCTION public.revogar_desbloqueio(uuid) IS
+  'Retira a excecao do mes corrente e volta a suspender as refeicoes do aluno '
+  'na mesma chamada. Devolve quantas foram suspensas.';
+
+-- A cantina entra na aplicacao como um utilizador autenticado qualquer; e a
+-- verificacao la dentro que a separa, como na 005 e na 007. O anon e o PUBLIC
+-- nao chegam la.
+REVOKE EXECUTE ON FUNCTION public.conceder_desbloqueio(uuid, text) FROM PUBLIC, anon;
+REVOKE EXECUTE ON FUNCTION public.revogar_desbloqueio(uuid)        FROM PUBLIC, anon;
+GRANT  EXECUTE ON FUNCTION public.conceder_desbloqueio(uuid, text) TO authenticated;
+GRANT  EXECUTE ON FUNCTION public.revogar_desbloqueio(uuid)        TO authenticated;
+
+COMMIT;
+
+
+-- =============================================================================
+-- SECCAO 5 - o leitor de codigo de barras
+-- =============================================================================
+BEGIN;
+
+-- O sexto resultado. Nome da restricao confirmado na base viva, nao adivinhado.
+ALTER TABLE public.leituras DROP CONSTRAINT leituras_resultado_check;
+ALTER TABLE public.leituras ADD  CONSTRAINT leituras_resultado_check
+  CHECK (resultado IN ('servido', 'sem_reserva', 'cancelada', 'repetido',
+                       'codigo_desconhecido', 'bloqueado'));
+
+-- Corpo da 009 inteiro, mais o bloco do bloqueio. Confirmado contra o
+-- pg_get_functiondef da base antes de reescrever - a licao da seccao 3.
+--
+-- ONDE ENTRA E QUE INTERESSA: depois de resolver o aluno pelo codigo e ANTES de
+-- ir ver a reserva. Estar bloqueado vale mais do que aquilo que a reserva diga,
+-- e a cantina precisa da razao mesmo quando nao ha reserva nenhuma para
+-- comentar - se a verificacao viesse depois, um aluno bloqueado sem reserva
+-- saia como 'sem_reserva' e ninguem ao balcao percebia que era dinheiro.
+CREATE OR REPLACE FUNCTION public.registar_leitura(p_codigo text, p_tipo text)
+RETURNS TABLE(resultado text, nome text, is_dieta boolean)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $function$
+DECLARE
+  v_uid       uuid := auth.uid();
+  v_hoje      date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  v_aluno     record;
+  v_res       record;
+  v_resultado text;
+  v_reserva   uuid;
+  v_dieta     boolean := false;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM cantina c WHERE c.id = v_uid) THEN
+    RAISE EXCEPTION 'Apenas a cantina pode registar leituras';
+  END IF;
+
+  IF p_tipo NOT IN ('pequeno_almoco', 'almoco', 'jantar') THEN
+    RAISE EXCEPTION 'Tipo de refeicao invalido: %', p_tipo USING ERRCODE = 'LEI01';
+  END IF;
+
+  SELECT a.id, a.nome INTO v_aluno FROM alunos a WHERE a.codigo = p_codigo;
+
+  IF NOT FOUND THEN
+    INSERT INTO leituras (aluno_id, codigo_lido, tipo, data, resultado, criado_por)
+    VALUES (NULL, p_codigo, p_tipo, v_hoje, 'codigo_desconhecido', v_uid);
+
+    RETURN QUERY SELECT 'codigo_desconhecido'::text, NULL::text, false;
+    RETURN;
+  END IF;
+
+  -- Devolve o nome: ao balcao e preciso dizer a alguem, e nao a um codigo.
+  IF public.aluno_bloqueado(v_aluno.id) THEN
+    INSERT INTO leituras (aluno_id, codigo_lido, tipo, data, resultado, criado_por)
+    VALUES (v_aluno.id, p_codigo, p_tipo, v_hoje, 'bloqueado', v_uid);
+
+    RETURN QUERY SELECT 'bloqueado'::text, v_aluno.nome, false;
+    RETURN;
+  END IF;
+
+  -- No maximo uma linha: reservas tem UNIQUE (aluno_id, data, tipo) desde a 001.
+  SELECT r.id, r.ativa, r.is_dieta INTO v_res
+  FROM reservas r
+  WHERE r.aluno_id = v_aluno.id AND r.data = v_hoje AND r.tipo = p_tipo;
+
+  IF NOT FOUND THEN
+    v_resultado := 'sem_reserva';
+  ELSIF NOT v_res.ativa THEN
+    -- Separavel do sem_reserva unicamente porque a linha cancelada sobrevive.
+    v_resultado := 'cancelada';
+    v_reserva   := v_res.id;
+  ELSIF EXISTS (
+      SELECT 1 FROM leituras l
+      WHERE l.aluno_id  = v_aluno.id
+        AND l.data      = v_hoje
+        AND l.tipo      = p_tipo
+        AND l.resultado = 'servido'
+  ) THEN
+    v_resultado := 'repetido';
+    v_reserva   := v_res.id;
+    v_dieta     := coalesce(v_res.is_dieta, false);
+  ELSE
+    v_resultado := 'servido';
+    v_reserva   := v_res.id;
+    v_dieta     := coalesce(v_res.is_dieta, false);
+  END IF;
+
+  INSERT INTO leituras (aluno_id, codigo_lido, tipo, data, resultado, reserva_id, criado_por)
+  VALUES (v_aluno.id, p_codigo, p_tipo, v_hoje, v_resultado, v_reserva, v_uid);
+
+  RETURN QUERY SELECT v_resultado, v_aluno.nome, v_dieta;
+END; $function$;
+
+COMMIT;
