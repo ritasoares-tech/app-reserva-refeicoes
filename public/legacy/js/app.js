@@ -6,7 +6,6 @@ function waitForSupabase() {
   return new Promise(resolve => {
     if(window.supabaseClient) {
       supabaseClient = window.supabaseClient;
-      console.log("✅ supabaseClient disponível");
       resolve();
       return;
     }
@@ -14,7 +13,6 @@ function waitForSupabase() {
     const checkInterval = setInterval(() => {
       if(window.supabaseClient) {
         supabaseClient = window.supabaseClient;
-        console.log("✅ supabaseClient disponível após aguardar");
         clearInterval(checkInterval);
         resolve();
       }
@@ -47,20 +45,16 @@ let elements = {};
 
 // Função para recarregar elementos (após DOM estar pronto)
 function loadElements() {
-  console.log("🔄 Carregando elementos do DOM...");
   
   elements = {
     login: getEl("login"),
     email: getEl("email"),
     password: getEl("password"),
     btnLogin: getEl("btnLogin"),
-    menuSelect: getEl("menuSelect"),
     alunoMenuSelect: getEl("alunoMenuSelect"),
     cantinaMenuSelect: getEl("cantinaMenuSelect"),
-    menuTitle: getEl("menuTitle"),
     alunoMenuTitle: getEl("alunoMenuTitle"),
     cantinaMenuTitle: getEl("cantinaMenuTitle"),
-    buttons: getEl("buttons"),
     alunoButtons: getEl("alunoButtons"),
     cantinButtons: getEl("cantinButtons"),
     saldoAluno: getEl("saldo"),
@@ -75,7 +69,6 @@ function loadElements() {
   };
   
   const elementosCarregados = Object.keys(elements).filter(k => elements[k]);
-  console.log("✅ Elementos carregados:", elementosCarregados.length, "de", Object.keys(elements).length);
   if(elementosCarregados.length < Object.keys(elements).length) {
     const elementosFaltosos = Object.keys(elements).filter(k => !elements[k]);
     console.warn("⚠️ Elementos faltosos:", elementosFaltosos);
@@ -84,13 +77,35 @@ function loadElements() {
   // Attach event listeners para botões importantes
   if (elements.btnAddMenu) {
     elements.btnAddMenu.addEventListener("click", addMenu);
-    console.log("✅ Event listener do 'btnAddMenu' atribuído");
   }
 }
 
 /* ==============================
    FUNÇÕES UTILITÁRIAS
 ============================== */
+
+// Estes dois viviam noutros ficheiros: o formatarData EM DUPLICADO no aluno.js e
+// no cantina.js, com corpos idênticos, e o escapeHtml só no cantina.js. Os
+// quatro scripts partilham o mesmo escopo global, por isso funcionava — o
+// aluno.js definia o formatarData depois e ganhava, sem ninguém reparar. E o
+// aluno.js passou a precisar de escapar texto, e não deve depender de um
+// ajudante definido no ficheiro da cantina. Mesmos corpos, só mudaram de sítio.
+function formatarData(dataISO) {
+  if (!dataISO) return "";
+  const [ano, mes, dia] = dataISO.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+function escapeHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 const show = id => {
   document.querySelectorAll(".container").forEach(c => c.classList.add("hidden"));
   getEl(id) && getEl(id).classList.remove("hidden");
@@ -103,7 +118,8 @@ const addBack = id => {
   btn.className = "btn-back";
   btn.textContent = "Voltar";
   btn.onclick = menu;
-  container.appendChild(btn);
+  // No topo, como em todos os outros ecras (passagem de UI, 2026-09-04).
+  container.insertBefore(btn, container.firstChild);
 };
 
 const tipoEmoji = tipo => {
@@ -197,15 +213,46 @@ function showModal(config) {
                        config.type === 'warning' ? 'modal-warning' : '';
     modal.className = `modal-content ${modalClass}`;
     
+    // Campos opcionais. Sem config.fields nada disto corre e o showModal
+    // comporta-se exatamente como antes - a extensao e aditiva de propria
+    // vontade, porque este modal e partilhado pelos dois papeis.
+    const fields = config.fields || [];
+    const domIdOf = (id) => `modal${id.charAt(0).toUpperCase()}${id.slice(1)}`;
+
     let html = `
       <div class="modal-header">
         <span>${config.icon || 'ℹ️'}</span>
         <div class="modal-title">${config.title}</div>
       </div>
       <div class="modal-message">${config.message}</div>
-      <div class="modal-buttons">
     `;
-    
+
+    if (fields.length) {
+      html += `<div style="text-align:left; margin-bottom:12px;">`;
+      fields.forEach(f => {
+        const id = domIdOf(f.id);
+        if (f.type === 'checkbox') {
+          html += `
+            <label style="display:block; margin-bottom:8px; font-size:14px; cursor:pointer;">
+              <input type="checkbox" id="${id}"> ${f.label}
+            </label>`;
+          return;
+        }
+        const escondido = f.revealedBy ? ' display:none;' : '';
+        const campo = f.type === 'textarea'
+          ? `<textarea id="${id}" rows="3" style="width:100%; box-sizing:border-box;"></textarea>`
+          : `<input type="text" id="${id}" style="width:100%; box-sizing:border-box;">`;
+        html += `
+          <div id="${id}Wrap" style="margin-bottom:8px;${escondido}">
+            <label for="${id}" style="display:block; font-size:13px; margin-bottom:4px;">${f.label}</label>
+            ${campo}
+          </div>`;
+      });
+      html += `<div id="modalFieldError" style="display:none; color:#dc3545; font-size:13px;"></div></div>`;
+    }
+
+    html += `<div class="modal-buttons">`;
+
     if (config.buttons && config.buttons.length) {
       config.buttons.forEach(btn => {
         const btnClass = btn.type === 'primary' ? 'modal-button-primary' :
@@ -221,20 +268,68 @@ function showModal(config) {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     
+    // Mostrar o campo so quando a caixa correspondente esta marcada. Sem isto
+    // o campo do lanche ficava escondido para sempre.
+    fields.filter(f => f.revealedBy).forEach(f => {
+      const box  = modal.querySelector(`#${domIdOf(f.revealedBy)}`);
+      const wrap = modal.querySelector(`#${domIdOf(f.id)}Wrap`);
+      if (!box || !wrap) return;
+      box.addEventListener('change', () => {
+        wrap.style.display = box.checked ? '' : 'none';
+      });
+    });
+
+    // Ler os valores ANTES de remover o overlay. Fazer ao contrario era a
+    // razao pela qual esta funcao nao conseguia recolher nada.
+    const recolher = () => {
+      const out = {};
+      fields.forEach(f => {
+        const el = modal.querySelector(`#${domIdOf(f.id)}`);
+        if (!el) return;
+        if (f.type === 'checkbox') { out[f.id] = el.checked; return; }
+        const visivel = !f.revealedBy || modal.querySelector(`#${domIdOf(f.revealedBy)}`)?.checked;
+        out[f.id] = visivel ? el.value.trim() : null;
+      });
+      return out;
+    };
+
+    const emFalta = () => fields.find(f => {
+      if (!f.required) return false;
+      const el = modal.querySelector(`#${domIdOf(f.id)}`);
+      return !el || !el.value.trim();
+    });
+
     // Resolver modal
     modal.querySelectorAll('.modal-button').forEach(button => {
-    button.addEventListener('click', () => {
-    const value = button.dataset.resolve === 'true';
-    overlay.remove();
-    resolve(value);
+      button.addEventListener('click', () => {
+        const value = button.dataset.resolve === 'true';
+
+        if (fields.length && value) {
+          const falta = emFalta();
+          if (falta) {
+            const erro = modal.querySelector('#modalFieldError');
+            erro.textContent = `${falta.label} é obrigatório.`;
+            erro.style.display = 'block';
+            return;                      // o modal fica aberto
+          }
+          const valores = recolher();
+          overlay.remove();
+          resolve(valores);
+          return;
+        }
+
+        overlay.remove();
+        // Com campos, desistir devolve null em vez de false: null e falsy, por
+        // isso quem se esquecer de verificar falha fechado.
+        resolve(fields.length ? null : value);
+      });
     });
-  });
-    
+
     // Fechar ao clicar fora
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay && config.canClose !== false) {
         overlay.remove();
-        resolve(false);
+        resolve(fields.length ? null : false);
       }
     });
   });
@@ -414,7 +509,6 @@ function handleError(error, mensagemFallback = 'Erro ao processar operação') {
    LOGIN / LOGOUT
 ============================== */
 async function login(){
-  console.log("🔐 Iniciando login...", { supabaseClient: !!supabaseClient });
   
   if(!elements.email || !elements.password) {
     mostrarErro("Erro", "Formulário não encontrado");
@@ -444,7 +538,6 @@ async function login(){
   }
 
   currentUser = data.user;
-  console.log("✅ Autenticado com sucesso", currentUser.email);
 
   // 1) Fonte de verdade segura: a tabela user_roles (o role vive na BD, não no browser)
   const { data: roles } = await supabaseClient
@@ -453,17 +546,17 @@ async function login(){
     .eq("user_id", currentUser.id);
 
   if (roles && roles.length) {
-    if (roles.some(r => r.role === "cantina")) { role = "cantina"; console.log("✅ Role (user_roles): cantina"); menu(); return; }
-    if (roles.some(r => r.role === "aluno"))   { role = "aluno";   console.log("✅ Role (user_roles): aluno");   menu(); return; }
+    if (roles.some(r => r.role === "cantina")) { role = "cantina"; menu(); return; }
+    if (roles.some(r => r.role === "aluno"))   { role = "aluno";   menu(); return; }
   }
 
   // 2) Fallback temporário (enquanto a migração de segurança não está aplicada):
   //    ainda decide pelo email nas tabelas antigas.
   const { data: aluno } = await supabaseClient.from("alunos").select("id").eq("email", email);
-  if(aluno && aluno.length){ role = "aluno"; console.log("⚠️ Role (fallback): aluno"); menu(); return; }
+  if(aluno && aluno.length){ role = "aluno"; menu(); return; }
 
   const { data: cantina } = await supabaseClient.from("cantina").select("id").eq("email", email);
-  if(cantina && cantina.length){ role = "cantina"; console.log("⚠️ Role (fallback): cantina"); menu(); return; }
+  if(cantina && cantina.length){ role = "cantina"; menu(); return; }
 
   mostrarErro("Acesso Negado", "Utilizador autenticado mas sem role atribuído.");
   console.error("❌ Utilizador sem role em user_roles nem em aluno/cantina");
@@ -505,6 +598,8 @@ async function menu(){
     elements.alunoButtons.innerHTML = `
       <button class="btn-full" onclick="showAlunoMenu()">Reservar Refeição</button>
       <button class="btn-full" onclick="showAlunoReservas()">Minhas Reservas</button>
+      <button class="btn-full" onclick="showNotificacoes()">🔔 Notificações</button>
+      <button class="btn-full" onclick="showMeuCodigo()">🎫 O Meu Código</button>
     `;
     await saldo();
     await carregarNotificacoesInline(); // Mostrar notificações diretamente na página inicial
@@ -516,7 +611,10 @@ async function menu(){
       <button class="btn-full" onclick="showCriarMenu()">Criar Menus</button>
       <button class="btn-full" onclick="showMenusCriados()">Menus Criados</button>
       <button class="btn-full" onclick="showCantinaReservasHoje()">Reservas do Dia</button>
+      <button class="btn-full" onclick="showLeitorCodigo()">Leitor</button>
       <button class="btn-full" onclick="showCantinaHistorico()">Histórico de Aluno</button>
+      <button class="btn-full" onclick="showCantinaAlunos()">Alunos</button>
+      <button class="btn-full" onclick="showPedidosCancelamento()">Pedidos de Cancelamento</button>
       <button class="btn-full" onclick="showCantinaSaldos()">Valores Pendentes</button>
     `;
   }
@@ -535,7 +633,7 @@ async function saldo(){
       .from("reservas")
       .select("preco, data")
       .eq("aluno_id", aluno.id)
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if(error){
       handleError(error, "Erro ao buscar reservas");
@@ -543,7 +641,7 @@ async function saldo(){
     }
 
     if(!reservas || reservas.length === 0){
-      elements.saldoAluno.innerHTML = "Sem valores em dívida.";
+      elements.saldoAluno.innerHTML = "<div class='empty-state compacto'><div class='empty-state-icon'>✅</div>Sem valores em dívida.</div>";
       return;
     }
 
@@ -600,15 +698,21 @@ async function saldo(){
     const keyMesAtual = `${anoAtual}-${mesAtual + 1}`;
     const valorMesAtual = porMes[keyMesAtual] || 0;
 
+    // Com um unico mes, e sendo o atual, a linha "Mes atual" repetia o total
+    // logo por baixo. So aparece quando ha mais do que um mes a somar.
+    const soMesAtual = mesesOrdenados.length === 1 && porMes[keyMesAtual] !== undefined;
+
     elements.saldoAluno.innerHTML = `
+      ${soMesAtual ? "" : `
       <div style="margin-bottom:6px;">
         <div style="font-size:12px;color:#888;">Mês atual</div>
         <b>${nomeMesAtual} - ${Number(valorMesAtual).toFixed(2)}€</b>
       </div>
-      <hr style="margin:8px 0;">
-      <div id="totalDividaToggle" onclick="toggleDetalheDivida()" style="cursor:pointer;">
-        <b>Total em Dívida:</b>
-        <span style="float:right">${Number(total).toFixed(2)}€ <span id="setaDivida">▾</span></span>
+      <hr style="margin:8px 0;">`}
+      <div id="totalDividaToggle" onclick="toggleDetalheDivida()"
+           style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:12px;">
+        <b>Total em dívida:</b>
+        <span>${Number(total).toFixed(2)}€ <span id="setaDivida">▾</span></span>
       </div>
       <div id="detalheDivida" class="hidden" style="margin-top:10px;padding-top:8px;border-top:1px dashed #ccc;font-size:15px;font-weight:500;">
         ${detalhe}

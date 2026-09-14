@@ -2428,3 +2428,49 @@ hr {
   visibility: hidden !important;
   pointer-events: none !important;
 }
+/* =============================================================================
+   Passagem de UI, 2026-09-04
+   ============================================================================= */
+
+/* 4. Setas do calendario. A regra global `button` pinta o texto de branco e o
+   fundo inline era cinzento claro: setas brancas em cinzento, invisiveis. */
+.cal-nav{
+  width:36px!important;min-width:36px!important;height:36px;padding:0!important;
+  flex:0 0 36px;background:#fff!important;color:#333!important;
+  border:1px solid #bbb!important;border-radius:8px;font-size:22px;line-height:1;
+  box-shadow:none!important;text-transform:none;letter-spacing:0;
+}
+.cal-nav:hover{background:#f5f5f5!important;transform:none;box-shadow:none!important;}
+
+/* 5. Historico de Aluno: linhas compactas numa grelha, em vez de 149 cartoes
+   de 80px a toda a largura. A classe .aluno-card fica, porque os testes e o
+   handler dependem dela; muda so o aspeto dentro desta lista. */
+#listaAlunosHistorico{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;}
+#listaAlunosHistorico .aluno-card{
+  padding:10px 14px;min-height:0;font-size:14px;text-align:left;justify-content:flex-start;
+  border-radius:10px;animation:none;width:auto;
+}
+#listaAlunosHistorico .aluno-card:hover{transform:translateY(-2px);}
+
+/* 7. Lista de nomes das Reservas do Dia em colunas. */
+.lista-nomes{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 16px;}
+
+/* 6. Alunos: a acao que retira o contrato e secundaria, nao um botao solido. */
+.btn-outline{background:#fff!important;color:var(--primary)!important;border:2px solid var(--primary)!important;box-shadow:none!important;}
+.btn-outline:hover{background:#fff5f5!important;}
+
+/* 6 e 15. Chips de filtro e de ordenacao. */
+.filtro-chip{
+  padding:6px 12px;font-size:12px;border-radius:999px;background:#fff!important;color:#555!important;
+  border:1px solid #ccc!important;box-shadow:none!important;text-transform:none;letter-spacing:0;
+  font-weight:600;width:auto;min-width:0;
+}
+.filtro-chip:hover{background:#f5f5f5!important;transform:none;box-shadow:none!important;}
+.filtro-chip.ativo{background:var(--primary)!important;color:#fff!important;border-color:var(--primary)!important;}
+
+/* 16. Estado vazio pequeno, para dentro de um dia ou de um cartao. */
+.empty-state.compacto{padding:22px 16px;margin:10px 0;}
+.empty-state.compacto .empty-state-icon{font-size:28px;margin-bottom:6px;animation:none;}
+
+/* 12. O Voltar fica no topo de todos os ecras. */
+.btn-back{margin-bottom:16px;}

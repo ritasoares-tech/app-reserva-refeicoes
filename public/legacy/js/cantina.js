@@ -1,56 +1,16 @@
 // Funções da área da cantina (menus, reservas, histórico, saldos, relatórios)
 
-function formatarData(dataISO) {
-  if (!dataISO) return "";
-  const [ano, mes, dia] = dataISO.split("-");
-  return `${dia}/${mes}/${ano}`;
-}
+/* formatarData e escapeHtml vivem agora no app.js. */
 
-// Função para enviar email de notificação via Edge Function
-async function enviarEmailNotificacao(email, assunto, mensagem, nomeAluno) {
-  try {
-    const SUPABASE_URL = "https://fghsgknistganzbuxrjt.supabase.co";
-    const ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnaHNna25pc3RnYW56YnV4cmp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNDUzNjcsImV4cCI6MjA4MzgyMTM2N30.6NPsu-DeQuEpjnHptdZTgsYmtx7mQ5STs8zbwYgIoYY";
-    
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification-email`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email,
-        subject: assunto,
-        message: mensagem,
-        studentName: nomeAluno
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('⚠️ Erro ao enviar email:', await response.text());
-      return false;
-    }
-
-    console.log('✅ Email enviado para:', email);
-    return true;
-  } catch (error) {
-    console.warn('⚠️ Exceção ao enviar email:', error);
-    return false;
-  }
-}
+// Eram globais implícitas: nasciam da atribuição dentro de showCantinaReservasHoje,
+// sem declaração nenhuma.
+let reservasHoje = [];
+let reservasHojePorTipo = {};
 
 /* ==============================
    CANTINA — NAVEGAÇÃO BASE
 ============================== */
 
-function showCantinaDashboard() {
-  esconderTodasPaginas();
-
-  const pagina = document.getElementById("cantinaDashboard");
-  if (pagina) {
-    pagina.classList.remove("hidden");
-  }
-}
 
 /* =============================
    CANTINA — CRIAR MENU
@@ -78,7 +38,6 @@ function _badgeMenuCantina(tipo){
 }
 
 async function showCriarMenu() {
-  console.log("📝 Mostrando calendário de criar menu");
   show("cantinaMenu");
 
   if(!_mesCriarView) _mesCriarView = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -145,16 +104,22 @@ function renderCalendarioCriarMenu(){
     const isHoje = iso === hojeISO;
     const isSel = iso === _diaCriarSelecionado;
     const badges = menusDia.map(m => _badgeMenuCantina(m.tipo)).join("");
+    // Fim de semana sem menus: neutro, não vermelho. Oito a dez "falta criar"
+    // por mês em dias que a cantina não serve tiravam o significado ao vermelho.
+    const dow = new Date(ano, mes, dia).getDay();
+    const fimDeSemana = dow === 0 || dow === 6;
 
     let fundo = "transparent";
     if(isSel) fundo = "#fff3cd";
     else if(completo) fundo = "#e8f5e9";
     else if(temMenus) fundo = "#fffde7";
+    else if(!passado && fimDeSemana) fundo = "#f5f5f5";
     else if(!passado) fundo = "#ffebee";
 
     const borda = isSel ? "2px solid #ffc107"
                  : completo ? "1px solid #a5d6a7"
                  : temMenus ? "1px solid #ffe082"
+                 : (!passado && fimDeSemana) ? "1px solid #e0e0e0"
                  : (!passado ? "1px dashed #ef9a9a" : "1px solid transparent");
 
     const clicavel = !passado;
@@ -185,15 +150,16 @@ function renderCalendarioCriarMenu(){
         Toca num dia para criar os menus.<br>
         <span style="color:#c62828;">Vermelho</span> = falta criar &nbsp;·&nbsp;
         <span style="color:#f9a825;">Amarelo</span> = incompleto &nbsp;·&nbsp;
-        <span style="color:#2e7d32;">Verde</span> = completo
+        <span style="color:#2e7d32;">Verde</span> = completo &nbsp;·&nbsp;
+        <span style="color:#999;">Cinzento</span> = fim de semana
       </p>`;
   }
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesCriar(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesCriar(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesCriar(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesCriar(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -268,7 +234,6 @@ async function criarRefeicao(iso, tipo){
 }
 
 async function addMenuDireto(dataValue, tipo, pratoEntrada) {
-  console.log("📝 Adicionando menu...", { supabaseClient: !!supabaseClient });
 
   if (!supabaseClient) {
     mostrarMensagem("error", "❌ Erro: Conexão não pronta. Atualiza a página.");
@@ -277,7 +242,6 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
   }
 
   let prato = (pratoEntrada || "").trim();
-  console.log("📋 Valores do formulário:", { dataValue, tipo, prato });
 
   if (!dataValue) {
     mostrarMensagem("warning", "⚠️ Seleciona uma data");
@@ -332,7 +296,6 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
     }
 
     try {
-      console.log("🌐 Enviando para Supabase...", { dataValue, tipo, prato, preco: configuracao[tipo].preco });
       
       const { data, error } = await supabaseClient
         .from("menus")
@@ -349,46 +312,11 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
         return;
       }
 
-      // 🍽️ O almoço é reservado automaticamente para todos os alunos assim que criado
-      if (tipo === "almoco" && data && data.length) {
-        const menuCriado = data[0];
-        const { data: alunos, error: erroAlunos } = await supabaseClient
-          .from("alunos")
-          .select("id");
-
-        if (!erroAlunos && alunos && alunos.length) {
-          // Evitar duplicados: verificar que alunos já têm reserva de almoço neste dia
-          const { data: jaReservados } = await supabaseClient
-            .from("reservas")
-            .select("aluno_id")
-            .eq("data", dataValue)
-            .eq("tipo", "almoco");
-
-          const idsComReserva = new Set((jaReservados || []).map(r => r.aluno_id));
-
-          const reservasAuto = alunos
-            .filter(a => !idsComReserva.has(a.id))
-            .map(a => ({
-              aluno_id: a.id,
-              menu_id: menuCriado.id,
-              data: dataValue,
-              preco: menuCriado.preco,
-              tipo: "almoco",
-              is_dieta: false,
-              cancelamento_tipo: null
-            }));
-
-          if (reservasAuto.length) {
-            const { error: erroReservas } = await supabaseClient
-              .from("reservas")
-              .insert(reservasAuto);
-            if (erroReservas) console.error("⚠️ Erro ao reservar almoço automaticamente", erroReservas);
-          }
-        }
-      }
+      // O almoço é reservado automaticamente para todos os alunos pelo trigger
+      // criar_reservas_automaticas_almoco, na base de dados (ver migração 001).
+      // Não duplicar aqui: o trigger corre sempre, mesmo se o menu for criado por outra via.
 
       mostrarSucesso("Menu Criado", "Menu criado com sucesso!");
-      console.log("✅ Menu criado com sucesso", data);
   } catch (err) {
     handleError(err, "Erro ao criar menu");
   } finally {
@@ -416,21 +344,10 @@ function toggleDia(data) {
 }
 
 // 🔐 Proteção simples contra HTML injection
-function escapeHtml(text) {
-  if (!text) return "";
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 let _mesMenusView = null;
 let _diaMenusSelecionado = null;
 
 async function showMenusCriados() {
-  console.log("📋 Carregando menus criados...");
   show("cantinaMenus");
   showLoading("⏳ Carregando menus...");
 
@@ -530,9 +447,9 @@ function renderCalendarioMenusCriados(){
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesMenus(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesMenus(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesMenus(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesMenus(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -546,7 +463,7 @@ function renderCalendarioMenusCriados(){
 
 function _cartoesMenusDia(iso){
   const menus = (window.todosOsMenus || []).filter(m => m.data === iso);
-  if(!menus.length) return `<i>Sem menus neste dia.</i>`;
+  if(!menus.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem menus neste dia.</div>`;
 
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   menus.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
@@ -585,7 +502,7 @@ function _cartoesMenusDia(iso){
           <b>${nomes[m.tipo] || m.tipo}</b>
           <span style="color:#007bff;font-weight:bold;">${preco}€</span>
         </div>
-        ${prato ? `<div style="font-size:13px;color:#555;margin-bottom:8px;">${prato}</div>`
+        ${prato ? `<div style="font-size:13px;color:#555;margin-bottom:8px;">${escapeHtml(prato)}</div>`
                 : `<div style="font-size:13px;color:#999;margin-bottom:8px;">Sem prato</div>`}
         ${acoes}
       </div>
@@ -605,78 +522,6 @@ function formatarTipoRefeicao(tipo) {
   return nomes[tipo] || tipo;
 }
 
-function renderMenusFiltrados() {
-  const container = document.getElementById("listaMenus");
-  if (!container) return;
-
-  let menusFiltrados = window.todosOsMenus || [];
-
-  if (!menusFiltrados.length) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <span class="empty-state-icon">🔍</span>
-        <p>Nenhum menu encontrado para a data selecionada</p>
-      </div>`;
-    return;
-  }
-
-  const hoje = new Date();
-  const hojeStr = hoje.toISOString().split("T")[0];
-  const horaAtual = hoje.getHours();
-
-  // Renderizar lista simples sem agrupamento hierárquico
-  const menusHtml = menusFiltrados.map(m => {
-    const tipo = escapeHtml(m.tipo || "");
-    const prato = escapeHtml(m.prato || "");
-    const preco = Number(m.preco || 0).toFixed(2);
-    const data = m.data;
-
-    const dataObj = new Date(data);
-    const dataFormatada = dataObj.toLocaleDateString('pt-PT', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-
-    const dataMenu = new Date(data);
-    let podeEditar = false;
-
-    if (dataMenu > new Date(hojeStr)) podeEditar = true;
-    if (data === hojeStr && horaAtual < 9) podeEditar = true;
-
-    return `
-      <div class="menu-item" style="margin-bottom:12px;padding:12px;background:#f9f9f9;border-radius:6px;display:flex;justify-content:space-between;align-items:center;">
-        <div style="flex:1;">
-          <div style="font-size:14px;color:#666;margin-bottom:4px;">${dataFormatada}</div>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:20px;">${tipoEmoji(tipo)}</span>
-            <div>
-              <b>${formatarTipoRefeicao(tipo)}</b>
-              ${prato ? `<span style="color:#666;"> — ${prato}</span>` : ""}
-            </div>
-            <span style="color:#007bff;font-weight:bold;margin-left:auto;">${preco}€</span>
-          </div>
-        </div>
-        <div style="display:flex;gap:6px;margin-left:12px;">
-          ${
-            podeEditar
-              ? `
-              <button class="btn-edit" onclick="startEdit('${m.id}')" style="padding:6px 10px;font-size:12px;">
-                ✏️
-              </button>
-              <button class="btn-delete" onclick="apagarMenu('${m.id}')" style="padding:6px 10px;font-size:12px;">
-                🗑️
-              </button>
-            `
-              : `<span style="color:#999;font-size:12px;">Bloqueado</span>`
-          }
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  container.innerHTML = `<div style="margin-top:12px;">${menusHtml}</div>`;
-}
 /* =============================
    CANTINA — EDITAR / APAGAR MENU
 ============================= */
@@ -728,14 +573,6 @@ async function saveEdit(id, novoPrato) {
 
     // Notificar alunos que têm reserva neste menu
     try {
-      console.log("🔔 Iniciando envio de notificações...");
-      console.log("📋 Dados da notificação:", {
-        menu_id: id,
-        prato_antigo: pratosAntigo,
-        prato_novo: novoPrato,
-        data_menu: menuAntigo.data,
-        tipo_menu: menuAntigo.tipo
-      });
 
       const { data: notificacoes, error: erroNotif } = await supabaseClient
         .rpc('notificar_menu_alterado', {
@@ -746,51 +583,18 @@ async function saveEdit(id, novoPrato) {
           p_tipo_menu: menuAntigo.tipo
         });
 
-      console.log("📊 Resposta da RPC:", { notificacoes, erroNotif });
 
       if (erroNotif) {
         console.error("❌ Erro na função RPC:", erroNotif);
       } else if (notificacoes > 0) {
-        console.log(`✅ Notificações enviadas para ${notificacoes} aluno(s)`);
-
-        // Enviar emails para os alunos
-        const { data: alunosComReserva, error: erroAlunos } = await supabaseClient
-          .from('reservas')
-          .select('alunos(email, nome)')
-          .eq('menu_id', id)
-          .is('cancelamento_tipo', null);
-
-        if (!erroAlunos && alunosComReserva) {
-          const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
-          const dataObj = new Date(menuAntigo.data);
-          const dia = dataObj.getDate();
-          const mes = nomesMeses[dataObj.getMonth()];
-          const tipoNome = menuAntigo.tipo === 'almoco' ? 'Almoço' : 
-                          menuAntigo.tipo === 'pequeno_almoco' ? 'Pequeno Almoço' : 
-                          menuAntigo.tipo === 'jantar' ? 'Jantar' : menuAntigo.tipo;
-
-          const assunto = `Menu Alterado - ${tipoNome}, ${dia} de ${mes}`;
-          const mensagem = `A cantina alterou o menu que reservaste para <strong>${dia} de ${mes}</strong>.<br><br><strong>Prato anterior:</strong> ${pratosAntigo}<br><strong>Prato novo:</strong> ${novoPrato}`;
-
-          // Enviar emails (paralelo)
-          const emailsEnviados = await Promise.allSettled(
-            alunosComReserva.map(r => 
-              enviarEmailNotificacao(r.alunos.email, assunto, mensagem, r.alunos.nome)
-            )
-          );
-
-          const sucesso = emailsEnviados.filter(e => e.status === 'fulfilled' && e.value === true).length;
-          console.log(`📧 Emails enviados: ${sucesso}/${alunosComReserva.length}`);
-        }
       } else {
-        console.log("⚠️ Nenhuma notificação enviada (provavelmente não há reservas ativas neste menu)");
       }
     } catch (erroNotif) {
       console.error("❌ Exceção ao notificar alunos:", erroNotif);
       // Não bloqueia a operação se notificações falhar
     }
 
-    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!\n✅ Alunos foram notificados da alteração.");
+    mostrarSucesso("Prato Atualizado", "Prato atualizado com sucesso!\n✅ Os alunos com reserva veem o aviso na app.");
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao atualizar prato");
@@ -800,10 +604,8 @@ async function saveEdit(id, novoPrato) {
 }
 
 async function apagarMenu(id) {
-  console.log("🗑️ Apagando menu:", id);
 
   if (!await confirmar("Apagar Menu", "Tens a certeza que queres apagar este menu?")) {
-    console.log("❌ Operação cancelada pelo utilizador");
     return;
   }
 
@@ -821,7 +623,6 @@ async function apagarMenu(id) {
     }
 
     mostrarSucesso("Sucesso", "Menu apagado com sucesso!");
-    console.log("✅ Menu apagado:", id);
     showMenusCriados();
   } catch (err) {
     handleError(err, "Erro ao apagar menu");
@@ -850,7 +651,7 @@ async function showCantinaReservasHoje() {
       alunos ( nome )
     `)
     .eq("data", hoje)
-    .is("cancelamento_tipo", null);
+    .eq("ativa", true);
 
   if (error) {
     div.innerHTML = `<i>${error.message}</i>`;
@@ -896,7 +697,7 @@ async function showCantinaReservasHoje() {
 
   div.innerHTML = `
     ${cardRefeicao('pequeno_almoco','🥐','Pequeno Almoço',reservasHojePorTipo.pequeno_almoco.length,'#1565c0')}
-    ${cardRefeicao('almoco','🍽️','Almoço',reservasHojePorTipo.almoco.length,'#2e7d32')}
+    ${cardRefeicao('almoco','🍽️','Almoço (normal)',reservasHojePorTipo.almoco.length,'#2e7d32')}
     ${cardRefeicao('dieta','🥗','Dieta',reservasHojePorTipo.dieta.length,'#f9a825')}
     ${cardRefeicao('jantar','🌙','Jantar',reservasHojePorTipo.jantar.length,'#6a1b9a')}
   `;
@@ -914,7 +715,7 @@ async function alunoTemDivida(alunoId) {
       .from("reservas")
       .select("id")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null)
+      .eq("ativa", true)
       .lt("data", inicioMesAtual)
       .limit(1);
 
@@ -937,9 +738,9 @@ function verDetalheRefeicao(tipo) {
 
   if (lista.length === 0) {
     div.innerHTML = `
+      <button class="btn-back" onclick="showCantinaReservasHoje()">Voltar às Reservas de Hoje</button>
       <h3>${formatarTipoRefeicao(tipo)}</h3>
-      <i>Sem reservas</i>
-      <br><button onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
+      <div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem reservas</div>
     `;
     return;
   }
@@ -947,19 +748,18 @@ function verDetalheRefeicao(tipo) {
   const nomesOrdenados = [...lista].sort((a,b)=> (a.alunos?.nome||"").localeCompare(b.alunos?.nome||""));
 
   div.innerHTML = `
+    <button class="btn-back" onclick="showCantinaReservasHoje()">Voltar às Reservas de Hoje</button>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
       <h3 style="margin:0;">${formatarTipoRefeicao(tipo)} — ${nomesOrdenados.length}</h3>
       <button class="btn-medium" onclick="imprimirListaRefeicao('${tipo}')">🖨️ Exportar / Imprimir</button>
     </div>
-    <div style="margin-top:12px;">
+    <div class="lista-nomes" style="margin-top:12px;">
       ${nomesOrdenados.map((r,i) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:8px 4px;border-bottom:1px solid #eee;">
-          <span style="color:#999;width:22px;">${i+1}.</span> 👤 ${escapeHtml(r.alunos.nome)}
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #eee;">
+          <span style="color:#999;width:26px;text-align:right;">${i+1}.</span> ${escapeHtml(r.alunos.nome)}
         </div>
       `).join("")}
     </div>
-    <br>
-    <button class="btn-back" onclick="showCantinaReservasHoje()">⬅️ Voltar às Reservas de Hoje</button>
   `;
 }
 
@@ -1019,27 +819,37 @@ async function showCantinaHistorico() {
   const div = document.getElementById("listaAlunosHistorico");
   div.innerHTML = "⏳ A carregar alunos...";
 
+  // A lista vem dos ALUNOS e não das reservas. Antes ia buscar todas as reservas
+  // e removia os repetidos aqui, e o PostgREST corta a resposta nas 1000 linhas
+  // por omissão: com 1195 reservas chegavam 1000, e nessas só havia 125 alunos
+  // distintos dos 149 que têm reservas. A cantina não conseguia abrir o
+  // histórico de 24 alunos, e não havia erro nenhum a dizê-lo — a lista apenas
+  // vinha mais curta. Encontrado a olho, num teste manual: qualquer teste
+  // automático escolhe um aluno que calha estar dentro das primeiras 1000 linhas.
+  //
+  // Assim a lista cresce com o número de alunos e não com o número de refeições,
+  // por isso nunca mais se aproxima do limite. Passam a aparecer também os alunos
+  // sem reservas nenhumas, o que para quem procura um aluno é melhor - e o ecrã
+  // de detalhe já trata desse caso.
   const { data, error } = await supabaseClient
-    .from("reservas")
-    .select("aluno_id, alunos(nome)")
-    .order("aluno_id");
+    .from("alunos")
+    .select("id, nome")
+    .order("nome");
 
   if (error) {
-    div.innerHTML = `<i>❌ Erro: ${error.message}</i>`;
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
     return;
   }
 
   if (!data || data.length === 0) {
-    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem reservas registadas.</div>";
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem alunos registados.</div>";
     document.getElementById("alunosPesquisaBox").style.display = "none";
     return;
   }
 
-  alunosHistoricoLista = [
-    ...new Map(
-      data.map(r => [r.aluno_id, r.alunos.nome])
-    ).entries()
-  ].sort((a, b) => a[1].localeCompare(b[1]));
+  alunosHistoricoLista = data
+    .map(a => [a.id, a.nome])
+    .sort((a, b) => a[1].localeCompare(b[1]));
 
   alunosHistoricoFiltrados = [...alunosHistoricoLista];
 
@@ -1073,13 +883,18 @@ function exibirAlunosHistorico() {
   }
 
   div.innerHTML = alunosHistoricoFiltrados.map(([id, nome]) => `
-    <div class="aluno-card" onclick="showHistoricoAluno('${id}', '${nome}')">
-      👤 ${nome}
+    <div class="aluno-card" onclick="showHistoricoAluno('${id}')">
+      👤 ${escapeHtml(nome)}
     </div>
   `).join("");
 }
 
-async function showHistoricoAluno(alunoId, alunoNome) {
+// O nome deixou de viajar dentro do onclick. Estava interpolado num literal de
+// string JS dentro de um atributo HTML, por isso um nome com apostrofe - O'Brien
+// - partia o handler todo. Isso e um erro a serio, nao uma hipotese. Agora entra
+// so o id e o nome vem do estado.
+async function showHistoricoAluno(alunoId) {
+  const alunoNome = (alunosHistoricoLista.find(([id]) => id === alunoId) || [])[1] || "";
   alunoHistoricoAtual = alunoId;
   nomeAlunoHistoricoAtual = alunoNome;
 
@@ -1087,6 +902,12 @@ async function showHistoricoAluno(alunoId, alunoNome) {
   document.getElementById("listaAlunosHistorico").innerHTML = "";
   document.getElementById("btnBackHistorico").style.display = "inline-block";
   document.getElementById("btnBackMenu").style.display = "none";
+
+  // O nome é escrito ANTES de ir buscar as reservas. A lista passou a incluir
+  // alunos sem reserva nenhuma, e nesse caso isto saía pelo return de baixo sem
+  // nunca chegar a dizer de quem era o ecrã que estava a mostrar.
+  // innerText, não innerHTML: o nome não é escapado e não precisa de ser.
+  document.getElementById("NomeAluno").innerText = alunoNome;
 
   const div = document.getElementById("historico");
   div.innerHTML = "⏳ A carregar histórico...";
@@ -1097,7 +918,8 @@ async function showHistoricoAluno(alunoId, alunoNome) {
       id,
       tipo,
       data,
-      cancelada,
+      ativa,
+      cancelamento_tipo,
       preco,
       is_dieta,
       menus!inner(prato)
@@ -1106,7 +928,7 @@ async function showHistoricoAluno(alunoId, alunoNome) {
     .order("data", { ascending: false });
 
   if (error) {
-    div.innerHTML = `<i>❌ Erro: ${error.message}</i>`;
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
     return;
   }
 
@@ -1114,8 +936,7 @@ async function showHistoricoAluno(alunoId, alunoNome) {
     div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem histórico disponível para este aluno.</div>";
     return;
   }
-  
-  document.getElementById("NomeAluno").innerText = alunoNome;
+
   historicoAtual = reservas;
   historicoFiltrado = [...reservas];
   _diaHistSelecionado = null;
@@ -1139,23 +960,55 @@ function selecionarDiaHistorico(iso){
   exibirHistoricoFiltrado();
 }
 
+// Estado legível de uma reserva, derivado de cancelamento_tipo (fonte de verdade única).
+// Espelha as etiquetas usadas em aluno.js › _cartaoReserva.
+// `ativa` é calculada pela base de dados: NULL e 'reactivated' são ativas.
+function _estadoReserva(r){
+  switch(r.cancelamento_tipo){
+    case "user":        return { texto: "❌ Cancelada pelo aluno", classe: "status-cancelada" };
+    case "contrato":    return { texto: "🏷️ Cancelada pela cantina (mudança de contrato)", classe: "status-cancelada" };
+    case "payment":     return { texto: "💳 Paga",                 classe: "status-cancelada" };
+    case "reactivated": return { texto: "🔄 Reativada",            classe: "status-ativa" };
+    // Suspensa pelo bloqueio (011). Não foi cancelada por ninguém, e volta
+    // quando a dívida for paga ou a cantina levantar o bloqueio.
+    case "bloqueado":   return { texto: "🔒 Suspensa (valores em atraso)", classe: "status-cancelada" };
+    default:            return { texto: "✅ Ativa",                classe: "status-ativa" };
+  }
+}
+
 function _cartoesHistoricoDia(iso){
   const doDia = (historicoAtual || []).filter(r => r.data === iso);
-  if(!doDia.length) return `<i>Sem reservas neste dia.</i>`;
+  if(!doDia.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem reservas neste dia.</div>`;
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   doDia.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
-  return doDia.map(r => `
+
+  // Acção direta só em almoços ativos de hoje em diante: um pedido por telefone
+  // é sempre sobre uma refeição que ainda não foi servida. Dias passados ficam
+  // como histórico, só de leitura.
+  const hoje = new Date().toISOString().split("T")[0];
+
+  return doDia.map(r => {
+    const podeAlterar = r.tipo === "almoco" && r.ativa && r.data >= hoje;
+    return `
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:12px;margin-bottom:10px;text-align:left;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
         <b>${formatarTipoRefeicao(r.tipo)}${r.is_dieta ? " 🥗" : ""}</b>
         <span style="color:#007bff;font-weight:bold;">${Number(r.preco).toFixed(2)}€</span>
       </div>
       <div style="font-size:13px;color:#555;margin-bottom:6px;">${escapeHtml(r.menus?.prato || "-")}</div>
-      <div class="${r.cancelada ? 'status-cancelada' : 'status-ativa'}" style="font-size:12px;">
-        ${r.cancelada ? '❌ Cancelada' : '✅ Ativa'}
+      <div class="${_estadoReserva(r).classe}" style="font-size:12px;">
+        ${_estadoReserva(r).texto}
       </div>
+      ${podeAlterar ? `
+        <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          <button onclick="alterarReservaDireto('${r.id}', 'cancelar')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#dc3545;color:white;border:none;border-radius:4px;cursor:pointer;">Cancelar</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'dieta')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#ffc107;color:#333;border:none;border-radius:4px;cursor:pointer;">Dieta</button>
+          <button onclick="alterarReservaDireto('${r.id}', 'normal')" style="flex:1 1 auto;padding:6px 10px;font-size:12px;background:#e2e3e5;color:#333;border:1px solid #6c757d;border-radius:4px;cursor:pointer;">Normal</button>
+        </div>
+      ` : ""}
     </div>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function exibirHistoricoFiltrado() {
@@ -1220,9 +1073,9 @@ function exibirHistoricoFiltrado() {
 
   div.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesHistorico(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesHistorico(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES_CANTINA[mes]} ${ano}</b>
-      <button onclick="mudarMesHistorico(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesHistorico(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -1254,6 +1107,7 @@ function backToHistoricoList() {
 ============================= */
 
 let alunoAtual = null;
+let _alunosBloqueados = new Set();   // ids que o alunos_bloqueados devolve (011)
 
 async function showCantinaSaldos() {
   show("cantinaSaldos");
@@ -1263,10 +1117,15 @@ async function showCantinaSaldos() {
   showLoading("⏳ Carregando valores em dívida...");
 
   try {
-    const { data, error } = await supabaseClient
-      .from("reservas")
-      .select("aluno_id, preco, alunos(nome)")
-      .is("cancelamento_tipo", null);
+    // A soma é feita na base de dados (saldos_por_aluno, migração 007). Antes
+    // este ecrã ia buscar TODAS as reservas ativas e somava aqui, e o PostgREST
+    // corta a resposta nas 1000 linhas por omissão: os alunos que ficavam de
+    // fora apareciam sem dívida nenhuma, e o que calhava em cima do corte
+    // aparecia com parte da dívida - tudo em silêncio, e esta é a lista pela
+    // qual a cantina cobra. Terceira aparição do mesmo defeito (relatório
+    // mensal, histórico de aluno, e este). A função devolve exatamente o que
+    // este ecrã já consumia: { id, nome, total, refeicoes }.
+    const { data, error } = await supabaseClient.rpc("saldos_por_aluno");
 
     if (error) {
       handleError(error, "Erro ao carregar Valores em Dívida");
@@ -1277,23 +1136,18 @@ async function showCantinaSaldos() {
     if (!data || data.length === 0) {
       todosSaldos = [];
       saldosFiltrados = [];
-      div.innerHTML = "<i>✅ Sem dívidas.</i>";
+      div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>✅</div>Sem dívidas.</div>";
       return;
     }
 
-    const saldsMap = {};
-    data.forEach(r => {
-      if (!saldsMap[r.aluno_id]) {
-        saldsMap[r.aluno_id] = { 
-          id: r.aluno_id, 
-          nome: r.alunos.nome, 
-          total: 0 
-        };
-      }
-      saldsMap[r.aluno_id].total += Number(r.preco);
-    });
+    // Quem está bloqueado (011), para a cantina ver antes de o aluno chegar ao
+    // balcão. Uma chamada só, e a conta na base de dados pela mesma razão do
+    // saldos_por_aluno acima. Se falhar, a lista mostra-se na mesma sem marca.
+    const { data: bloqueados, error: erroBloqueados } = await supabaseClient.rpc("alunos_bloqueados");
+    if (erroBloqueados) console.warn("Não foi possível ler os alunos bloqueados:", erroBloqueados);
+    _alunosBloqueados = new Set(bloqueados || []);
 
-    todosSaldos = Object.values(saldsMap);
+    todosSaldos = data.map(s => ({ id: s.id, nome: s.nome, total: Number(s.total) }));
     saldosFiltrados = [...todosSaldos];
     ordenarSaldos('nome');
 
@@ -1321,14 +1175,15 @@ function renderizarSaldos() {
   const html = saldosFiltrados
     .map(s => `
       <div class="saldo-linha" onclick="showSaldoAluno('${s.id}')">
-        <span class="saldo-nome">${s.nome}</span>
+        <span class="saldo-nome">${escapeHtml(s.nome)}${_alunosBloqueados.has(s.id) ? `
+          <span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:11px;font-weight:700;
+                       background:#fff4e5;color:#b35000;border:1px solid #e8590c;white-space:nowrap;">🔒 Bloqueado</span>` : ""}</span>
         <span class="saldo-valor">${Number(s.total).toFixed(2)}€</span>
       </div>
     `)
     .join("");
   
   div.innerHTML = html;
-  console.log(`📊 A mostrar ${saldosFiltrados.length} de ${todosSaldos.length} saldos`);
 }
 
 function filtrarSaldos() {
@@ -1347,6 +1202,11 @@ function filtrarSaldos() {
 
 function ordenarSaldos(tipo) {
   ordenacaoSaldos = tipo;
+  const chipNome = document.getElementById("ordNome"), chipValor = document.getElementById("ordValor");
+  if(chipNome && chipValor){
+    chipNome.classList.toggle("ativo", tipo === "nome");
+    chipValor.classList.toggle("ativo", tipo === "valor");
+  }
   
   if(tipo === 'nome') {
     saldosFiltrados.sort((a, b) => a.nome.localeCompare(b.nome));
@@ -1370,80 +1230,19 @@ async function showSaldoAluno(alunoId) {
   showLoading("⏳ Carregando dados...");
 
   try {
-    // Primeiro, verificar diretamente as reservas do aluno para debug
-    console.log('🔍 DEBUG: Verificando reservas do aluno ID:', alunoId);
-    const { data: todasReservas, error: erroReservas } = await supabaseClient
-      .from("reservas")
-      .select("data, preco, cancelada, tipo, id")
-      .eq("aluno_id", alunoId)
-      .order("data", { ascending: false });
+    // Antes do early return do "Sem dívidas": o painel é sobre o aluno, não
+    // sobre haver meses a mostrar, e uma exceção dada fica visível na mesma.
+    await _renderEstadoBloqueio(alunoId);
 
-    console.log('🔍 DEBUG: Todas as reservas do aluno:', todasReservas);
-    console.log('🔍 DEBUG: Erro reservas:', erroReservas);
-    console.log('🔍 DEBUG: Total de reservas encontradas:', todasReservas?.length || 0);
-
-    // Verificar reservas não canceladas
-    const reservasNaoCanceladas = todasReservas?.filter(r => !r.cancelada) || [];
-    console.log('🔍 DEBUG: Reservas não canceladas:', reservasNaoCanceladas);
-    console.log('🔍 DEBUG: Total de reservas não canceladas:', reservasNaoCanceladas.length);
-
-    // Calcular total manualmente para verificação
-    const totalManual = reservasNaoCanceladas.reduce((sum, r) => sum + Number(r.preco), 0);
-    console.log('🔍 DEBUG: Total manual calculado:', totalManual);
-
-    // Se não há reservas não canceladas, mostrar detalhes
-    if (reservasNaoCanceladas.length === 0 && todasReservas && todasReservas.length > 0) {
-      console.log('🔍 DEBUG: Todas as reservas estão canceladas!');
-      console.log('🔍 DEBUG: Detalhes das reservas canceladas:', 
-        todasReservas.map(r => ({ data: r.data, preco: r.preco, cancelada: r.cancelada })));
-    }
-
-    // Usar função original que funciona com as reservas
-    console.log('🔍 Buscando dívida por mês com RPC...');
     const { data: dividas, error } = await supabaseClient
       .rpc('obter_divida_por_mes', { p_aluno_id: alunoId });
 
-    console.log('🔍 DEBUG: Erro RPC:', error);
-    console.log('🔍 DEBUG: Resultado RPC:', dividas);
-
     if (error) {
-      console.error("Erro ao buscar dívida por mês:", error);
       handleError(error, "Erro ao carregar dívidas do aluno");
       return;
     }
 
-    console.log('🔍 Dívidas encontradas pela RPC:', dividas);
-
     if (!dividas || dividas.length === 0) {
-      console.log('📋 Nenhuma dívida encontrada pela função RPC');
-      
-      // Se há reservas não canceladas mas RPC não retorna, há problema na função
-      if (reservasNaoCanceladas.length > 0) {
-        console.log('⚠️ ALERTA: Há reservas não canceladas mas a RPC não retornou dívidas!');
-        console.log('⚠️ Verificando se a função RPC está correta...');
-        
-        // Tentar calcular dívida manualmente e mostrar
-        const porMes = {};
-        reservasNaoCanceladas.forEach(r => {
-          const data = new Date(r.data);
-          const chave = `${data.getFullYear()}-${data.getMonth() + 1}`;
-          if (!porMes[chave]) {
-            porMes[chave] = { ano: data.getFullYear(), mes: data.getMonth() + 1, valor: 0 };
-          }
-          porMes[chave].valor += Number(r.preco);
-        });
-        
-        console.log('🔍 DEBUG: Dívida calculada manualmente por mês:', porMes);
-        
-        // Mostrar dívida manualmente calculada
-        const dividasManuais = Object.values(porMes);
-        if (dividasManuais.length > 0) {
-          console.log('🔄 Usando dívida calculada manualmente...');
-          await mostrarDividaManual(alunoId, dividasManuais);
-          return;
-        }
-      }
-      
       document.getElementById("tituloAluno").innerText = "Sem dívidas";
       document.getElementById("valorTotal").innerText = "€0.00";
       document.getElementById("mesesDivida").innerHTML = "";
@@ -1462,77 +1261,23 @@ async function showSaldoAluno(alunoId) {
   }
 }
 
-// Função auxiliar para mostrar dívida calculada manualmente
-async function mostrarDividaManual(alunoId, dividas) {
-  // Obter nome do aluno
-  const { data: aluno } = await supabaseClient
-    .from("alunos")
-    .select("nome")
-    .eq("id", alunoId)
-    .single();
-
-  if (aluno && aluno.nome) {
-    document.getElementById("tituloAluno").innerText = aluno.nome;
-  } else {
-    document.getElementById("tituloAluno").innerText = "Aluno";
-  }
-
-  // Calcular total
-  const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
-  document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
-
-  // Exibir meses em dívida
-  const mesesDivida = document.getElementById("mesesDivida");
-  mesesDivida.innerHTML = "";
-
-  const nomesMeses = [
-    "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-    "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
-  ];
-
-  dividas.forEach(item => {
-    const nomeMes = nomesMeses[item.mes - 1];
-    const emAtraso = new Date() > new Date(item.ano, item.mes, 15);
-
-    mesesDivida.innerHTML += `
-      <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
-        <span>${nomeMes} ${item.ano}</span>
-        <strong>${Number(item.valor).toFixed(2)}€</strong>
-        <button class="${emAtraso ? 'btn-atraso' : ''}" onclick="liquidarMes('${alunoId}', ${item.ano}, ${item.mes})">
-          ${emAtraso ? '⚠️ Liquidar' : 'Liquidar mês'}
-        </button>
-      </div>
-    `;
-  });
-
-  // Mostrar botão de liquidar total
-  const btnLiquidar = document.getElementById("btnLiquidarTotal");
-  btnLiquidar.classList.remove("hidden");
-  btnLiquidar.style.display = "block";
-}
-
 // Função auxiliar para processar dívidas encontradas
 async function processarDividasEncontradas(alunoId, dividas) {
   // Obter nome do aluno
-  console.log('🔍 Buscando nome do aluno...');
   const { data: aluno } = await supabaseClient
     .from("alunos")
     .select("nome")
     .eq("id", alunoId)
     .single();
 
-  console.log('👤 Aluno encontrado:', aluno);
   if (aluno && aluno.nome) {
     document.getElementById("tituloAluno").innerText = aluno.nome;
-    console.log('✅ Nome do aluno definido no título:', aluno.nome);
   } else {
     document.getElementById("tituloAluno").innerText = "Aluno";
-    console.log('⚠️ Nome do aluno não encontrado, usando padrão');
   }
 
   // Calcular total
   const total = dividas.reduce((sum, item) => sum + Number(item.valor), 0);
-  console.log('💰 Total calculado:', total);
   document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
 
   // Exibir meses em dívida
@@ -1544,12 +1289,10 @@ async function processarDividasEncontradas(alunoId, dividas) {
     "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
   ];
 
-  console.log('📅 Processando meses em dívida...');
   dividas.forEach(item => {
     const nomeMes = nomesMeses[item.mes - 1];
     const emAtraso = item.em_atraso;
 
-    console.log(`📊 Mês: ${nomeMes} ${item.ano}, Valor: ${item.valor}€, Atraso: ${emAtraso}`);
 
     mesesDivida.innerHTML += `
       <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
@@ -1568,89 +1311,138 @@ async function processarDividasEncontradas(alunoId, dividas) {
   btnLiquidar.style.display = "block";
 }
 
-// Função de fallback caso a nova função não exista
-async function carregarSaldoAlunoFallback(alunoId) {
-  try {
-    const { data: reservas, error } = await supabaseClient
-      .from("reservas")
-      .select("data, preco, alunos(nome)")
+/* =============================
+   CANTINA — BLOQUEIO POR VALORES EM ATRASO (011)
+============================= */
+
+// O estado do bloqueio no detalhe do aluno. Dois casos, e nunca os dois:
+//  - bloqueado: diz-se, com o botão Desbloquear;
+//  - com exceção este mês: quem a deu, quando e porquê, com o botão Revogar.
+// Se as leituras falharem o painel fica vazio - o resto do ecrã (a dívida e a
+// liquidação) não pode depender disto.
+async function _renderEstadoBloqueio(alunoId){
+  const div = document.getElementById("estadoBloqueio");
+  if(!div) return;
+  div.innerHTML = "";
+
+  // A exceção em vigor é a mais recente, enquanto o desbloqueio_ate a cobrir:
+  // vale até à véspera do dia do bloqueio do mês seguinte ao dela, por isso do
+  // dia 1 ao 14 ainda pode ser a do mês passado.
+  const [{ data: bloqueado, error: erroBloqueado }, { data: ate }, { data: excecoes }] = await Promise.all([
+    supabaseClient.rpc("aluno_bloqueado", { p_aluno_id: alunoId }),
+    supabaseClient.rpc("desbloqueio_ate", { p_aluno_id: alunoId }),
+    supabaseClient.from("desbloqueios")
+      .select("motivo, criado_em, cantina_responsavel")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null);
+      .order("ano", { ascending: false })
+      .order("mes", { ascending: false })
+      .limit(1)
+  ]);
+  if(erroBloqueado){ console.warn("Não foi possível ler o bloqueio:", erroBloqueado); return; }
 
-    if (error) {
-      handleError(error, "Erro ao carregar histórico do aluno");
+  const painel = (fundo, borda, cor, conteudo) => `
+    <div style="background:${fundo};border:1px solid ${borda};border-left:4px solid ${borda};border-radius:8px;
+                padding:12px;margin:12px 0;color:${cor};font-size:14px;text-align:left;">
+      ${conteudo}
+    </div>`;
+
+  if(bloqueado){
+    div.innerHTML = painel("#fff4e5", "#e8590c", "#7a3a00", `
+      <b>🔒 Bloqueado — valores em atraso</b><br>
+      Não pode reservar nem ser servido, e as refeições marcadas estão suspensas até pagar.
+      <button class="btn-full" style="margin-top:10px;" onclick="desbloquearAluno('${alunoId}')">🔓 Desbloquear</button>
+    `);
+    return;
+  }
+
+  const hojeLisboa = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+  const excecao = excecoes && excecoes[0];
+  if(!excecao || !ate || ate < hojeLisboa) return;
+
+  let quem = "a cantina";
+  const { data: responsavel } = await supabaseClient
+    .from("cantina").select("nome").eq("id", excecao.cantina_responsavel).maybeSingle();
+  if(responsavel && responsavel.nome) quem = responsavel.nome;
+
+  div.innerHTML = painel("#e7f5ec", "#2e7d32", "#1e5b24", `
+    <b>🔓 Desbloqueado até ${formatarData(ate)}</b><br>
+    Por ${escapeHtml(quem)} em ${new Date(excecao.criado_em).toLocaleDateString("pt-PT")}.<br>
+    Motivo: ${escapeHtml(excecao.motivo)}
+    <button class="btn-full" style="margin-top:10px;" onclick="revogarDesbloqueio('${alunoId}')">Revogar</button>
+  `);
+}
+
+function _refeicoes(n, participio){
+  return `${n} ${n === 1 ? "refeição" : "refeições"} ${n === 1 ? participio : participio + "s"}`;
+}
+
+async function desbloquearAluno(alunoId){
+  const r = await showModal({
+    icon: "🔓",
+    type: "warning",
+    title: "Desbloquear Aluno",
+    message: "Vale como se o aluno tivesse pago até ao próximo pagamento: volta a poder reservar e ser servido até à véspera do dia de bloqueio do mês que vem, com a dívida por pagar. As refeições suspensas voltam já.",
+    fields: [
+      { id: "motivo", type: "textarea", label: "Motivo", required: true }
+    ],
+    buttons: [
+      { text: "Voltar",      type: "secondary", resolve: false },
+      { text: "Desbloquear", type: "primary",   resolve: true  }
+    ]
+  });
+  if(!r) return;   // null = Voltar ou clique fora
+
+  showLoading("⏳ A desbloquear...");
+  try {
+    const { data, error } = await supabaseClient
+      .rpc("conceder_desbloqueio", { p_aluno_id: alunoId, p_motivo: r.motivo });
+    hideLoading();
+    if(error){
+      await mostrarErro("Erro ao Desbloquear", error.message || "Erro inesperado");
       return;
     }
-
-    if (!reservas || reservas.length === 0) {
-      document.getElementById("tituloAluno").innerText = "Sem registros";
-      document.getElementById("valorTotal").innerText = "€0.00";
-      document.getElementById("mesesDivida").innerHTML = "";
-      document.getElementById("btnLiquidarTotal").style.display = "none";
-      return;
-    }
-
-    document.getElementById("tituloAluno").innerText = reservas[0].alunos.nome;
-
-    let total = 0;
-    const porMes = {};
-
-    reservas.forEach(r => {
-      total += Number(r.preco);
-      const d = new Date(r.data);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      porMes[key] = (porMes[key] || 0) + Number(r.preco);
-    });
-
-    document.getElementById("valorTotal").innerText = `${total.toFixed(2)}€`;
-
-    const hoje = new Date();
-    const mesesDivida = document.getElementById("mesesDivida");
-    mesesDivida.innerHTML = "";
-
-    const mesesOrdenados = Object.entries(porMes).sort((a, b) => {
-      const [anoA, mesA] = a[0].split("-");
-      const [anoB, mesB] = b[0].split("-");
-      return new Date(anoB, mesB - 1) - new Date(anoA, mesA - 1);
-    });
-
-    const nomesMeses = [
-      "Janeiro","Fevereiro","Março","Abril","Maio","Junho",
-      "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"
-    ];
-
-    mesesOrdenados.forEach(([key, valor]) => {
-      const [ano, mes] = key.split("-");
-      const limite = new Date(parseInt(ano), parseInt(mes) - 1, 15);
-      const emAtraso = hoje > limite;
-      const nomeMes = nomesMeses[parseInt(mes) - 1];
-
-      mesesDivida.innerHTML += `
-        <div class="mes-divida ${emAtraso ? 'em-atraso' : ''}">
-          <span>${nomeMes} ${ano}</span>
-          <strong>${valor.toFixed(2)}€</strong>
-          <button class="${emAtraso ? 'btn-atraso' : ''}" onclick="liquidarMes('${alunoId}', ${ano}, ${parseInt(mes)})">
-            ${emAtraso ? '⚠️ Liquidar' : 'Liquidar mês'}
-          </button>
-        </div>
-      `;
-    });
-
-    const btnLiquidar = document.getElementById("btnLiquidarTotal");
-    btnLiquidar.classList.remove("hidden");
-    btnLiquidar.style.display = "block";
-
-  } catch (err) {
-    handleError(err, "Erro ao processar dados do aluno");
+    const n = Number(data) || 0;
+    await mostrarSucesso("Aluno Desbloqueado",
+      n > 0 ? `Bloqueio levantado. ${_refeicoes(n, "reposta")}.` : "Bloqueio levantado. Não havia refeições suspensas.");
+    showSaldoAluno(alunoId);
+  } catch(err){
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao desbloquear");
+  } finally {
+    hideLoading();
   }
 }
+
+async function revogarDesbloqueio(alunoId){
+  if(!await confirmar("Revogar Desbloqueio",
+    "O aluno volta a ficar bloqueado e as refeições futuras voltam a ficar suspensas. Confirmas?")) return;
+
+  showLoading("⏳ A revogar...");
+  try {
+    const { data, error } = await supabaseClient
+      .rpc("revogar_desbloqueio", { p_aluno_id: alunoId });
+    hideLoading();
+    if(error){
+      await mostrarErro("Erro ao Revogar", error.message || "Erro inesperado");
+      return;
+    }
+    const n = Number(data) || 0;
+    await mostrarSucesso("Desbloqueio Revogado",
+      n > 0 ? `${_refeicoes(n, "suspensa")}.` : "Nenhuma refeição para suspender.");
+    showSaldoAluno(alunoId);
+  } catch(err){
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao revogar");
+  } finally {
+    hideLoading();
+  }
+}
+
+// Função de fallback caso a nova função não exista
 
 /* =============================
    CANTINA — AÇÕES DE LIQUIDAÇÃO
 ============================= */
 
 async function liquidarDividaTotal(alunoId) {
-  console.log("💰 Liquidando dívida total do aluno:", alunoId);
   
   if (!alunoId) {
     mostrarErro("Erro", "Aluno inválido. Volte atrás e tente novamente.");
@@ -1658,7 +1450,6 @@ async function liquidarDividaTotal(alunoId) {
   }
 
   if (!await confirmar("Liquidar Dívida", "Tem certeza que deseja liquidar TODA a dívida deste aluno?")) {
-    console.log("❌ Operação cancelada pelo utilizador");
     return;
   }
 
@@ -1671,7 +1462,7 @@ async function liquidarDividaTotal(alunoId) {
       .from("reservas")
       .select("data")
       .eq("aluno_id", alunoId)
-      .is("cancelamento_tipo", null);
+      .eq("ativa", true);
 
     if (erroReservas) {
       console.error("❌ Erro ao buscar reservas:", erroReservas);
@@ -1722,7 +1513,6 @@ async function liquidarDividaTotal(alunoId) {
         `Dívida liquidada com sucesso! (${mesesLiquidados} mês${mesesLiquidados !== 1 ? 'es' : ''}) - Valor: ${totalLiquidado.toFixed(2)}€`);
     }
     
-    console.log("✅ Dívida liquidada para aluno:", alunoId);
     
     // Recarregar dados do aluno
     setTimeout(() => {
@@ -1766,7 +1556,6 @@ async function liquidarMes(alunoId, ano, mes) {
 
     if (data && data.length > 0) {
       const resultado = data[0];
-      console.log('🔍 Resultado da liquidação:', resultado);
       
       if (!resultado.success) {
         mostrarErro("Erro", resultado.message || "Erro ao liquidar mês");
@@ -1781,7 +1570,6 @@ async function liquidarMes(alunoId, ano, mes) {
       }
     }
     
-    console.log(`✅ Mês ${mes}/${ano} liquidado para aluno:`, alunoId);
     
     // Recarregar dados do aluno
     setTimeout(() => {
@@ -1811,10 +1599,6 @@ function esconderTodasPaginas() {
     .forEach(p => p.classList.add("hidden"));
 }
 
-function voltarCantina() {
-  esconderTodasPaginas();
-  show("paginaCantina");
-}
 
 // Só permite relatório do mês atual e do mês anterior (este último apenas até dia 15)
 function preencherRelatorioPeriodos() {
@@ -1859,34 +1643,23 @@ async function gerarRelatorioMensal() {
   showLoading("⏳ Gerando relatório...");
 
   try {
+    // A soma passou para a base de dados. Antes isto ia buscar TODAS as reservas
+    // ativas e somava-as aqui, e o PostgREST corta a resposta nas 1000 linhas
+    // por omissão — verificado, devolvia exatamente 1000 havendo 1195 reservas.
+    // O Excel já andava a perder alunos sem ninguém dar por isso, porque um
+    // ficheiro com menos linhas não tem ar de estar errado. Com carga a sério um
+    // mês são ~8000 reservas e o relatório apanhava um oitavo delas.
+    // Uma linha por aluno nunca chega perto desse limite.
     const { data, error } = await supabaseClient
-      .from("reservas")
-      .select("aluno_id, preco, alunos(nome), data")
-      .is("cancelamento_tipo", null);
+      .rpc("relatorio_mensal", { p_ano: ano, p_mes: mes });
 
     if (error) {
-      mostrarErro("Erro", "Erro ao gerar relatório");
+      mostrarErro("Erro", error.message || "Erro ao gerar relatório");
       console.error(error);
       return;
     }
 
-    const reportData = {};
-    data.forEach(r => {
-      const d = new Date(r.data);
-      if (d.getFullYear() === ano && (d.getMonth() + 1) === mes) {
-        if (!reportData[r.aluno_id]) {
-          reportData[r.aluno_id] = {
-            nome: r.alunos.nome,
-            total_refeicoes: 0,
-            total_valor: 0
-          };
-        }
-        reportData[r.aluno_id].total_refeicoes += 1;
-        reportData[r.aluno_id].total_valor += Number(r.preco);
-      }
-    });
-
-    const resultado = Object.values(reportData);
+    const resultado = data || [];
 
     if (!resultado || resultado.length === 0) {
       mostrarInfo("Sem Dados", "Sem dados para este mês");
@@ -1925,12 +1698,11 @@ function exportarRelatorioExcel(dados, ano, mes) {
 ============================= */
 
 async function exportarSaldosExcel() {
-  console.log("📥 Iniciando exportação de valores em dívidas...");
-  
-  const { data, error } = await supabaseClient
-    .from("reservas")
-    .select("aluno_id, preco, alunos(nome)")
-    .is("cancelamento_tipo", null);
+  // Mesma consulta que o ecrã, pela mesma razão: a soma no browser sobre a
+  // tabela inteira parava nas 1000 linhas e o Excel saía com valores errados.
+  // Ver showCantinaSaldos. A função já vem ordenada por nome e traz o número
+  // de refeições, que é a coluna que este ficheiro precisa e o ecrã não.
+  const { data, error } = await supabaseClient.rpc("saldos_por_aluno");
 
   if (error) {
     mostrarErro("Erro", "Erro ao buscar valores em dívida: " + error.message);
@@ -1943,30 +1715,20 @@ async function exportarSaldosExcel() {
     return;
   }
 
-  const saldos = {};
-  data.forEach(r => {
-    if (!saldos[r.aluno_id]) {
-      saldos[r.aluno_id] = { nome: r.alunos.nome, total: 0, refeicoes: 0 };
-    }
-    saldos[r.aluno_id].total += Number(r.preco);
-    saldos[r.aluno_id].refeicoes += 1;
-  });
-
   const linhas = [["Aluno", "Refeições", "Total Dívida (€)"]];
   let totalGeral = 0;
   let refeicaoesTotal = 0;
 
-  Object.entries(saldos)
-    .sort((a, b) => a[1].nome.localeCompare(b[1].nome))
-    .forEach(([id, aluno]) => {
-      linhas.push([
-        aluno.nome,
-        aluno.refeicoes,
-        aluno.total.toFixed(2)
-      ]);
-      totalGeral += aluno.total;
-      refeicaoesTotal += aluno.refeicoes;
-    });
+  data.forEach(aluno => {
+    const total = Number(aluno.total);
+    linhas.push([
+      aluno.nome,
+      aluno.refeicoes,
+      total.toFixed(2)
+    ]);
+    totalGeral += total;
+    refeicaoesTotal += aluno.refeicoes;
+  });
 
   linhas.push([]);
   linhas.push(["TOTAL", refeicaoesTotal, totalGeral.toFixed(2)]);
@@ -1987,7 +1749,6 @@ async function exportarSaldosExcel() {
   const nomeFicheiro = `valores_em_divida_${data_hora}.xlsx`;
   
   XLSX.writeFile(wb, nomeFicheiro);
-  console.log("✅ Ficheiro exportado:", nomeFicheiro);
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
 
@@ -1997,7 +1758,6 @@ async function exportarHistoricoAluno() {
     return;
   }
 
-  console.log("📥 Iniciando exportação de histórico do aluno:", alunoAtual);
 
   const { data: aluno } = await supabaseClient
     .from("alunos")
@@ -2007,7 +1767,7 @@ async function exportarHistoricoAluno() {
 
   const { data: reservas, error } = await supabaseClient
     .from("reservas")
-    .select("data, tipo, preco, cancelada, is_dieta, menus(prato)")
+    .select("data, tipo, preco, ativa, cancelamento_tipo, is_dieta, menus(prato)")
     .eq("aluno_id", alunoAtual)
     .order("data", { ascending: false });
 
@@ -2033,7 +1793,7 @@ async function exportarHistoricoAluno() {
   reservas.forEach(r => {
     const tipoFormatado = r.tipo.replace("_", " ").toUpperCase();
     const dieta = r.is_dieta ? "Sim" : "Não";
-    const status = r.cancelada ? "Cancelada" : "Ativa";
+    const status = _estadoReserva(r).texto;
     
     linhas.push([
       formatarData(r.data),
@@ -2044,7 +1804,7 @@ async function exportarHistoricoAluno() {
       status
     ]);
 
-    if (!r.cancelada) {
+    if (r.ativa) {
       totalAtivo += r.preco;
     }
   });
@@ -2071,7 +1831,515 @@ async function exportarHistoricoAluno() {
   const nomeFicheiro = `historico_${aluno.nome.replace(/\s+/g, '_')}_${data_hora}.xlsx`;
 
   XLSX.writeFile(wb, nomeFicheiro);
-  console.log("✅ Ficheiro exportado:", nomeFicheiro);
   mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
 }
 
+
+/* =============================
+   CANTINA — PEDIDOS DE CANCELAMENTO (Cluster 6, passo 4)
+============================== */
+
+let _pedidosPendentes = [];
+
+async function showPedidosCancelamento(){
+  show("cantinaPedidos");
+
+  const div = document.getElementById("listaPedidos");
+  div.innerHTML = "⏳ A carregar pedidos...";
+
+  // listar_solicitacoes_pendentes NÃO é SECURITY DEFINER de própria vontade: as
+  // duas políticas de SELECT da 005 fazem o âmbito sozinhas. A cantina vê tudo.
+  const { data, error } = await supabaseClient.rpc("listar_solicitacoes_pendentes");
+
+  if(error){
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
+    return;
+  }
+
+  _pedidosPendentes = data || [];
+
+  if(!_pedidosPendentes.length){
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>📭</div>Sem pedidos pendentes.</div>";
+    return;
+  }
+
+  div.innerHTML = _pedidosPendentes.map(_cartaoPedido).join("");
+}
+
+// TUDO o que o aluno escreveu passa por escapeHtml. Isto é renderizado na sessão
+// da cantina, que é a conta que aprova cancelamentos e liquida dívidas.
+function _cartaoPedido(p){
+  return `
+    <div style="border:1px solid #e0e0e0; border-radius:10px; padding:12px; margin-bottom:10px; text-align:left;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <b>👤 ${escapeHtml(p.aluno_nome)}</b>
+        <span style="color:#666; font-size:13px;">${formatarTipoRefeicao(p.tipo_refeicao)} · ${p.data_reserva}</span>
+      </div>
+      <div style="font-size:13px; color:#555; margin-bottom:6px;">${escapeHtml(p.motivo || "-")}</div>
+      ${p.troca_por_lanche ? `
+        <div style="font-size:13px; color:#555; margin-bottom:6px;">
+          🥪 Pede troca por lanche: ${escapeHtml(p.lanche_substituto || "não especificado")}
+        </div>
+      ` : ""}
+      <div style="font-size:12px; color:#888; margin-bottom:8px;">
+        Cancelamentos aprovados nos últimos 30 dias: ${p.cancelamentos_30_dias}
+      </div>
+      <!-- flex:1 1 auto, NAO flex:1. O flex:1 e flex:1 1 0%, e uma base zero
+           iguala as larguras ignorando o conteudo, o que cortava o ultimo "r"
+           do "Cancelar". Com base auto a largura parte do texto e o
+           min-width:auto impede o botao de encolher abaixo dele. -->
+      <div style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'cancelar')" style="flex:1 1 auto; padding:8px 10px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Cancelar</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'dieta')" style="flex:1 1 auto; padding:8px 10px; background:#ffc107; color:#333; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Dieta</button>
+        <button onclick="decidirPedido('${p.solicitacao_id}', 'outros')" style="flex:1 1 auto; padding:8px 10px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Outros</button>
+        <button onclick="rejeitarPedido('${p.solicitacao_id}')" style="flex:1 1 auto; padding:8px 10px; background:#6c757d; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">Rejeitar</button>
+      </div>
+    </div>
+  `;
+}
+
+const _ROTULO_DECISAO = {
+  cancelar: "cancelar a reserva",
+  dieta:    "passar a reserva a dieta",
+  outros:   "registar a troca por outros alimentos e manter a reserva"
+};
+
+async function decidirPedido(solicitacaoId, decisao){
+  if(!await confirmar("Aprovar Pedido", `Confirmas ${_ROTULO_DECISAO[decisao]}?`)) return;
+
+  showLoading("⏳ A aprovar...");
+  try {
+    const { error } = await supabaseClient.rpc("aprovar_cancelamento_especial", {
+      p_solicitacao_id: solicitacaoId,
+      p_decisao: decisao,
+      p_observacoes: null
+    });
+    hideLoading();
+
+    if(error){
+      // "Pedido inexistente ou já processado" quer normalmente dizer que outra
+      // pessoa da cantina já decidiu isto, ou um duplo-clique. Mostrar e
+      // recarregar, para a linha desaparecer.
+      await mostrarErro("Erro ao Aprovar", error.message || "Erro inesperado");
+      showPedidosCancelamento();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Aprovado", "O pedido foi decidido.");
+    showPedidosCancelamento();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao aprovar");
+  } finally {
+    hideLoading();
+  }
+}
+
+async function rejeitarPedido(solicitacaoId){
+  if(!await confirmar("Rejeitar Pedido", "Confirmas que rejeitas este pedido? A refeição mantém-se.")) return;
+
+  showLoading("⏳ A rejeitar...");
+  try {
+    const { error } = await supabaseClient.rpc("rejeitar_cancelamento_especial", {
+      p_solicitacao_id: solicitacaoId,
+      p_observacoes: null
+    });
+    hideLoading();
+
+    if(error){
+      await mostrarErro("Erro ao Rejeitar", error.message || "Erro inesperado");
+      showPedidosCancelamento();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Rejeitado", "O pedido foi rejeitado.");
+    showPedidosCancelamento();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao rejeitar");
+  } finally {
+    hideLoading();
+  }
+}
+
+const _ROTULO_DIRETO = {
+  cancelar: "cancelar esta reserva",
+  dieta:    "passar esta reserva a dieta",
+  normal:   "voltar esta reserva a prato normal"
+};
+
+// Para quando o aluno telefona em vez de usar a app. A função da 005 deixa
+// rasto em cancelamentos_especiais sozinha, já como 'aprovado'.
+async function alterarReservaDireto(reservaId, decisao){
+  if(!await confirmar("Alterar Reserva", `Confirmas ${_ROTULO_DIRETO[decisao]}?`)) return;
+
+  showLoading("⏳ A alterar...");
+  try {
+    const { error } = await supabaseClient.rpc("cantina_alterar_reserva", {
+      p_reserva_id: reservaId,
+      p_decisao: decisao,
+      p_nota: null
+    });
+    hideLoading();
+
+    if(error){
+      await mostrarErro("Erro ao Alterar", error.message || "Erro inesperado");
+      return;
+    }
+
+    await mostrarSucesso("Reserva Alterada", "A reserva foi alterada.");
+    showHistoricoAluno(alunoHistoricoAtual);
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao alterar reserva");
+  } finally {
+    hideLoading();
+  }
+}
+
+/* ==============================
+   CANTINA — LEITOR DE CÓDIGOS
+============================== */
+
+let _leitorTipo = null;
+let _leitorHistorico = [];
+
+// O resultado de uma leitura em palavras, para a lista da sessão e para o
+// Excel. Antes saía o código cru ('sem_reserva'); com o sexto resultado (011)
+// passou a haver um mapa, e um valor desconhecido continua a sair cru em vez
+// de em branco.
+const _ROTULOS_LEITURA = {
+  servido:             "Servido",
+  sem_reserva:         "Sem reserva",
+  cancelada:           "Reserva cancelada",
+  repetido:            "Repetido",
+  codigo_desconhecido: "Código desconhecido",
+  bloqueado:           "Bloqueado (valores em atraso)"
+};
+function _rotuloLeitura(resultado){
+  return _ROTULOS_LEITURA[resultado] || resultado || "?";
+}
+
+// A refeição escolhe-se UMA vez e fica visível em grande o tempo todo. Um turno
+// esquecido depois do pequeno-almoço tem de saltar à vista aqui, e não ser
+// descoberto na exportação uma semana depois.
+function showLeitorCodigo(){
+  show("cantinaLeitor");
+  _leitorTipo = null;
+  _leitorHistorico = [];
+  _renderLeitor();
+}
+
+function _leitorEscolherTipo(tipo){
+  _leitorTipo = tipo;
+  _renderLeitor();
+}
+
+function _renderLeitor(){
+  const div = document.getElementById("leitorConteudo");
+
+  if(!_leitorTipo){
+    div.innerHTML = `
+      <p>Que refeição estás a servir?</p>
+      <button class="btn-full" onclick="_leitorEscolherTipo('pequeno_almoco')">🥐 Pequeno Almoço</button>
+      <button class="btn-full" onclick="_leitorEscolherTipo('almoco')">🍽️ Almoço</button>
+      <button class="btn-full" onclick="_leitorEscolherTipo('jantar')">🌙 Jantar</button>
+    `;
+    return;
+  }
+
+  div.innerHTML = `
+    <div style="background:#1565c0;color:#fff;padding:14px;border-radius:12px;
+                font-size:22px;font-weight:800;text-align:center;">
+      ${emojiTipo(_leitorTipo)} ${formatarTipoRefeicao(_leitorTipo)}
+      <button class="btn-medium" style="margin-left:12px;"
+              onclick="_leitorEscolherTipo(null)">Mudar</button>
+    </div>
+
+    <input id="leitorInput" autocomplete="off" inputmode="numeric"
+           placeholder="Passa o código..."
+           style="width:100%;box-sizing:border-box;font-size:20px;padding:12px;
+                  margin-top:14px;text-align:center;">
+
+    <div id="leitorResultado" style="margin-top:16px;"></div>
+
+    <div style="margin-top:18px;color:#666;font-size:13px;">
+      Leituras nesta sessão: <b id="leitorContagem">${_leitorHistorico.length}</b>
+    </div>
+    <div id="leitorHistorico" style="margin-top:8px;"></div>
+
+    <button class="btn-medium" style="margin-top:14px;"
+            onclick="exportarLeiturasExcel()">🖨️ Exportar leituras de hoje</button>
+  `;
+
+  const input = document.getElementById("leitorInput");
+
+  // O leitor USB é um teclado: escreve os dígitos e carrega em Enter. Não há
+  // API de dispositivo nenhuma aqui — é só um keydown.
+  input.addEventListener("keydown", (e) => {
+    if(e.key !== "Enter") return;
+    e.preventDefault();
+    const codigo = input.value.trim();
+    input.value = "";
+    if(codigo) _leitorProcessar(codigo);
+  });
+
+  // O foco tem de ser agressivo. Uma leitura para uma página sem foco perde-se
+  // em silêncio, e ao balcão isso é um aluno que se vai embora sem ficar
+  // registado.
+  input.focus();
+  document.getElementById("cantinaLeitor").onclick = () => input.focus();
+}
+
+async function _leitorProcessar(codigo){
+  const div = document.getElementById("leitorResultado");
+  div.innerHTML = "⏳";
+
+  const { data, error } = await supabaseClient.rpc("registar_leitura", {
+    p_codigo: codigo,
+    p_tipo: _leitorTipo
+  });
+
+  if(error){
+    div.innerHTML = `<div style="background:#c62828;color:#fff;padding:18px;border-radius:12px;">
+      ❌ Erro: ${escapeHtml(error.message)}</div>`;
+    return;
+  }
+
+  const r = (data && data[0]) || {};
+  const cores = {
+    servido:             { cor:"#2e7d32", icone:"✅", texto:"PODE SERVIR" },
+    sem_reserva:         { cor:"#c62828", icone:"⛔", texto:"SEM RESERVA" },
+    cancelada:           { cor:"#c62828", icone:"⛔", texto:"RESERVA CANCELADA" },
+    repetido:            { cor:"#f9a825", icone:"⚠️", texto:"JÁ TINHA SIDO SERVIDO" },
+    codigo_desconhecido: { cor:"#c62828", icone:"❓", texto:"CÓDIGO DESCONHECIDO" },
+    // Cor própria e não o vermelho do sem_reserva: ao balcão tem de se perceber
+    // de relance que é dinheiro, e não uma reserva que falta (011).
+    bloqueado:           { cor:"#4a148c", icone:"🔒", texto:"BLOQUEADO — VALORES EM ATRASO" }
+  };
+  const e = cores[r.resultado] || { cor:"#666", icone:"❓", texto:escapeHtml(r.resultado || "?") };
+
+  div.innerHTML = `
+    <div style="background:${e.cor};color:#fff;padding:22px;border-radius:14px;text-align:center;">
+      <div style="font-size:40px;">${e.icone}</div>
+      <div style="font-size:22px;font-weight:800;margin-top:6px;">${e.texto}</div>
+      <div style="font-size:20px;margin-top:10px;">${escapeHtml(r.nome || codigo)}</div>
+      ${r.is_dieta ? `<div style="margin-top:10px;font-size:20px;font-weight:800;
+        background:#fff;color:#f9a825;border-radius:8px;padding:6px;">🥗 DIETA</div>` : ""}
+    </div>
+  `;
+
+  _leitorHistorico.unshift({ nome: r.nome || codigo, resultado: r.resultado });
+  document.getElementById("leitorContagem").textContent = _leitorHistorico.length;
+  document.getElementById("leitorHistorico").innerHTML = _leitorHistorico
+    .slice(0, 5)
+    .map(h => `<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:14px;">
+        ${escapeHtml(h.nome)} — ${escapeHtml(_rotuloLeitura(h.resultado))}</div>`)
+    .join("");
+
+  document.getElementById("leitorInput").focus();
+}
+
+// FILTRADO POR DIA, DE PROPÓSITO. Uma consulta sem limites sobre um registo que
+// só cresce é exatamente o defeito das 1000 linhas do PostgREST, já encontrado
+// três vezes nesta aplicação — e um registo de leituras cresce mais depressa do
+// que as reservas cresceram. Um dia de leituras fica muito abaixo do corte.
+async function exportarLeiturasExcel(){
+  // O dia de Lisboa, não o UTC: a coluna data das leituras é escrita pelo
+  // servidor como (now() AT TIME ZONE 'Europe/Lisbon')::date. Com o UTC, entre
+  // a meia-noite e a uma da manhã no verão o ficheiro saía do dia errado.
+  // (sv-SE formata como AAAA-MM-DD.)
+  const dia = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+
+  const { data, error } = await supabaseClient
+    .from("leituras")
+    .select("data, tipo, resultado, codigo_lido, criado_em, alunos(nome)")
+    .eq("data", dia)
+    .order("criado_em");
+
+  if(error){
+    mostrarErro("Erro", "Erro ao exportar leituras: " + error.message);
+    return;
+  }
+
+  if(!data || data.length === 0){
+    mostrarInfo("Sem Leituras", "Não há leituras registadas hoje.");
+    return;
+  }
+
+  const linhas = [["Data", "Hora", "Refeição", "Aluno", "Código lido", "Resultado"]];
+
+  data.forEach(l => {
+    const h = new Date(l.criado_em);
+    linhas.push([
+      l.data,
+      `${String(h.getHours()).padStart(2,"0")}:${String(h.getMinutes()).padStart(2,"0")}`,
+      formatarTipoRefeicao(l.tipo),
+      l.alunos ? l.alunos.nome : "(desconhecido)",
+      l.codigo_lido,
+      _rotuloLeitura(l.resultado)
+    ]);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(linhas);
+  ws['!cols'] = [{wch:12},{wch:8},{wch:16},{wch:25},{wch:14},{wch:20}];
+  XLSX.utils.book_append_sheet(wb, ws, "Leituras");
+
+  const nomeFicheiro = `leituras_${dia}.xlsx`;
+  XLSX.writeFile(wb, nomeFicheiro);
+  mostrarSucesso("Sucesso", `Ficheiro exportado: ${nomeFicheiro}`, 1500);
+}
+
+/* ==============================
+   CANTINA — ALUNOS (CONTRATOS)
+============================== */
+
+let _alunosContrato = [];
+let _alunosContratoFiltrados = [];
+let _filtroContrato = "todos";   // 'todos' | 'completo' | 'parcial' | 'sem' - combinado com a pesquisa por nome
+
+// Os tres tipos de contrato (010). O parcial tem o preco do contrato mas nao
+// tem almoco automatico - marca-o o proprio aluno.
+const _TIPOS_CONTRATO = {
+  completo: { rotulo: "Contrato completo", cor: "#2e7d32", icone: "✅" },
+  parcial:  { rotulo: "Contrato parcial",  cor: "#1565c0", icone: "🔶" },
+  sem:      { rotulo: "Sem contrato",      cor: "#c62828", icone: "🏷️" }
+};
+
+// Um ecrã próprio e não um botão na lista do Histórico: aquela lista é um
+// seletor, e pôr um controlo que muda o que um aluno paga ao lado de "abrir o
+// histórico deste aluno" é a receita para um clique errado no sítio errado.
+async function showCantinaAlunos(){
+  show("cantinaAlunos");
+  const div = document.getElementById("listaAlunosContrato");
+  div.innerHTML = "⏳ A carregar alunos...";
+
+  const { data: cfg, error: errCfg } = await supabaseClient
+    .from("configuracao").select("preco_almoco_sem_contrato").single();
+  document.getElementById("precoSemContrato").value =
+    cfg ? Number(cfg.preco_almoco_sem_contrato).toFixed(2) : "";
+  // Um campo em branco sem explicação convidava a escrever um preço por cima
+  // de um erro. Dizer o que se passou.
+  if (errCfg) mostrarErro("Erro", "Não foi possível ler o preço do almoço sem contrato: " + errCfg.message);
+
+  // Cresce com os alunos, não com as refeições - nunca chega perto do corte
+  // das 1000 linhas.
+  const { data, error } = await supabaseClient
+    .from("alunos")
+    .select("id, nome, tipo_contrato")
+    .order("nome");
+
+  if (error) {
+    div.innerHTML = `<i>❌ Erro: ${escapeHtml(error.message)}</i>`;
+    return;
+  }
+
+  _alunosContrato = data || [];
+  document.getElementById("pesquisaAlunosContrato").value = "";
+  _filtrarContrato("todos");
+}
+
+function filtrarAlunosContrato(){
+  const termo = document.getElementById("pesquisaAlunosContrato").value.toLowerCase().trim();
+  _alunosContratoFiltrados = _alunosContrato.filter(a =>
+    (!termo || a.nome.toLowerCase().includes(termo)) &&
+    (_filtroContrato === "todos" || a.tipo_contrato === _filtroContrato)
+  );
+  _renderAlunosContrato();
+}
+
+function _filtrarContrato(filtro){
+  _filtroContrato = filtro;
+  document.querySelectorAll("#filtroContratoChips .filtro-chip").forEach(b =>
+    b.classList.toggle("ativo", b.dataset.filtro === filtro));
+  filtrarAlunosContrato();
+}
+
+function _renderAlunosContrato(){
+  const div = document.getElementById("listaAlunosContrato");
+  const total = _alunosContrato.length;
+  const parciais = _alunosContrato.filter(a => a.tipo_contrato === "parcial").length;
+  const sem      = _alunosContrato.filter(a => a.tipo_contrato === "sem").length;
+  document.getElementById("alunosContratoContagem").textContent =
+    `👥 ${total} aluno${total !== 1 ? "s" : ""} · ${parciais} parcia${parciais === 1 ? "l" : "is"} · ${sem} sem contrato`;
+
+  if(!_alunosContratoFiltrados.length){
+    div.innerHTML = "<div class='empty-state'><div class='empty-state-icon'>🔍</div>Nenhum aluno encontrado.</div>";
+    return;
+  }
+
+  div.innerHTML = _alunosContratoFiltrados.map(a => {
+    const t = _TIPOS_CONTRATO[a.tipo_contrato] || _TIPOS_CONTRATO.completo;
+    const chip = (tipo, texto) => `
+      <button class="filtro-chip ${a.tipo_contrato === tipo ? "ativo" : ""}"
+              onclick="_definirTipoContrato('${a.id}', '${tipo}')">${texto}</button>`;
+    return `
+    <div class="aluno-contrato-linha"
+         style="display:flex;align-items:center;justify-content:space-between;gap:10px;
+                padding:10px 8px;border-bottom:1px solid #eee;flex-wrap:wrap;">
+      <div>
+        <div style="font-weight:600;">${escapeHtml(a.nome)}</div>
+        <div style="font-size:13px;color:${t.cor};">${t.icone} ${t.rotulo}</div>
+      </div>
+      <div style="display:flex;gap:4px;">${chip("completo", "Completo")}${chip("parcial", "Parcial")}${chip("sem", "Sem")}</div>
+    </div>`;
+  }).join("");
+}
+
+// A confirmação aparece só quando a mudança CANCELA almoços - de completo para
+// qualquer dos outros, havendo almoços automáticos futuros. Diz quantos e para
+// que tipo. Mudanças que não cancelam nada não têm nada para avisar.
+async function _definirTipoContrato(alunoId, novoTipo){
+  const aluno = _alunosContrato.find(a => a.id === alunoId);
+  if(!aluno || aluno.tipo_contrato === novoTipo) return;
+  const nome = aluno.nome;
+  const destino = _TIPOS_CONTRATO[novoTipo].rotulo;
+
+  if(aluno.tipo_contrato === "completo"){
+    const { data: n } = await supabaseClient
+      .rpc("contar_almocos_automaticos_futuros", { p_aluno_id: alunoId });
+    const quantos = Number(n) || 0;
+    if(quantos > 0){
+      const ok = await showModal({
+        icon: "🏷️",
+        title: `Mudar para ${destino}?`,
+        message: `<b>${escapeHtml(nome)}</b> deixa de ter almoço automático`
+               + (novoTipo === "sem" ? ` e passa a pagar o preço sem contrato.` : `; o almoço passa a ser marcado pelo aluno, ao preço do menu.`)
+               + `<br><br>Vão ser cancelados <b>${quantos} almoço${quantos !== 1 ? "s" : ""}</b> já marcado${quantos !== 1 ? "s" : ""} para os próximos dias. `
+               + `O de hoje e os passados não mudam. O aluno pode voltar a marcá-los.`,
+        type: "warning",
+        buttons: [
+          { text: "Cancelar", type: "secondary", resolve: false },
+          { text: `Mudar para ${destino}`, type: "danger", resolve: true }
+        ]
+      });
+      if(!ok) return;
+    }
+  }
+
+  const { error } = await supabaseClient
+    .rpc("definir_tipo_contrato", { p_aluno_id: alunoId, p_tipo: novoTipo });
+  if(error){
+    mostrarErro("Erro", "Não foi possível alterar o contrato: " + error.message);
+    return;
+  }
+  aluno.tipo_contrato = novoTipo;
+  filtrarAlunosContrato();
+}
+
+async function guardarPrecoSemContrato(){
+  const valor = Number(String(document.getElementById("precoSemContrato").value).replace(",", "."));
+  if(!(valor > 0)){
+    mostrarErro("Valor inválido", "Indica um preço maior do que zero.");
+    return;
+  }
+
+  const { error } = await supabaseClient
+    .from("configuracao")
+    .update({ preco_almoco_sem_contrato: valor })
+    .eq("id", true);
+
+  if(error){
+    mostrarErro("Erro", "Não foi possível guardar o preço: " + error.message);
+    return;
+  }
+  mostrarSucesso("Preço guardado", `Almoço sem contrato: ${formatCurrency(valor)}`, 1800);
+}

@@ -3,14 +3,110 @@
 /* ==============================
    ALUNO — MENU POR DATA E RESERVAS
 ============================== */
-function formatarData(dataISO) {
-  if (!dataISO) return "";
-  const [ano, mes, dia] = dataISO.split("-");
-  return `${dia}/${mes}/${ano}`;
+/* formatarData vive agora no app.js, com o escapeHtml. */
+
+// O tipo de aluno e o preço do almoço sem contrato (008). O aluno lê a sua
+// própria linha e a configuração; se qualquer das duas falhar fica-se com o
+// comportamento de sempre (contrato, preço do menu), que é o caso de todos os
+// alunos até a cantina dizer o contrário. Usado pelos dois ecrãs que mostram
+// preços: Reservar Refeição e Minhas Reservas.
+async function _carregarTipoAluno(alunoId){
+  const { data: eu } = await supabaseClient
+    .from("alunos").select("tem_contrato").eq("id", alunoId).single();
+  _alunoTemContrato = eu ? eu.tem_contrato !== false : true;
+
+  const { data: cfg } = await supabaseClient
+    .from("configuracao").select("preco_almoco_sem_contrato").single();
+  _precoAlmocoSemContrato = cfg ? Number(cfg.preco_almoco_sem_contrato) : null;
 }
+
+// O preço de uma marcação NOVA desta refeição para este aluno - o critério do
+// reservas_guard: o do menu, salvo o almoço de quem não tem contrato.
+function _precoNovaMarcacao(tipo, precoMenu){
+  return (tipo === "almoco" && !_alunoTemContrato && _precoAlmocoSemContrato !== null)
+    ? _precoAlmocoSemContrato
+    : Number(precoMenu);
+}
+
+// ---------------------------------------------------------------
+// BLOQUEIO POR VALORES EM ATRASO (011)
+// Quem decide é a base de dados (aluno_bloqueado); o ecrã só tem de o dizer
+// ANTES do clique, porque um bloqueio calado lê-se como a app estar avariada.
+// Lido de novo em cada passagem pelos dois ecrãs e não uma vez por sessão: o
+// bloqueio pode cair (ou levantar-se) com o aluno já dentro da app.
+//
+// Se a leitura falhar fica-se sem aviso, e não com tudo trancado: a guarda do
+// servidor continua a recusar, e o RES11 tem mensagem própria.
+let _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0, ate: null };
+
+async function _carregarBloqueio(alunoId){
+  _bloqueio = { bloqueado: false, desbloqueado: false, divida: 0, ate: null };
+
+  const { data: bloqueado, error } = await supabaseClient
+    .rpc("aluno_bloqueado", { p_aluno_id: alunoId });
+  if(error){ console.warn("Não foi possível ler o bloqueio:", error); return; }
+
+  const hoje = new Date();
+  const ano = hoje.getFullYear(), mes = hoje.getMonth() + 1;
+
+  // A exceção da cantina só se procura em quem não está bloqueado - é a única
+  // razão para um aluno com dívida conseguir marcar. Até quando vale, di-lo o
+  // desbloqueio_ate: a véspera do dia do bloqueio do mês seguinte ao da exceção
+  // (vale como ter pago até ao pagamento seguinte). A data é a que o servidor usa.
+  let excecao = false, ate = null;
+  if(!bloqueado){
+    const { data: fim } = await supabaseClient.rpc("desbloqueio_ate", { p_aluno_id: alunoId });
+    const hojeLisboa = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+    excecao = !!fim && fim >= hojeLisboa;
+    if(!excecao) return;
+    ate = fim;
+  }
+
+  // O valor em atraso pela mesma definição do aluno_bloqueado: meses FECHADOS
+  // (antes do mês corrente) sem liquidação. São poucas linhas por aluno.
+  const [{ data: dividas }, { data: liquidados }] = await Promise.all([
+    supabaseClient.from("meses_em_divida").select("ano, mes, total").eq("aluno_id", alunoId),
+    supabaseClient.from("meses_liquidados").select("ano, mes").eq("aluno_id", alunoId)
+  ]);
+  const pagos = new Set((liquidados || []).map(l => `${l.ano}-${l.mes}`));
+  const divida = (dividas || [])
+    .filter(d => d.ano * 12 + d.mes < ano * 12 + mes && !pagos.has(`${d.ano}-${d.mes}`))
+    .reduce((s, d) => s + Number(d.total), 0);
+
+  // Uma exceção que sobrou depois de o aluno pagar não explica nada: não se diz.
+  _bloqueio = { bloqueado: !!bloqueado, desbloqueado: excecao && divida > 0, divida, ate };
+}
+
+function _avisoBloqueio(){
+  if(_bloqueio.bloqueado){
+    const valor = _bloqueio.divida > 0 ? `Tens ${formatCurrency(_bloqueio.divida)} em atraso.` : "Tens valores em atraso.";
+    return `
+      <div style="background:#fff4e5;border:1px solid #f5c08a;border-left:4px solid #e8590c;border-radius:6px;
+                  padding:12px;margin-bottom:14px;color:#7a3a00;font-size:14px;text-align:left;">
+        🔒 <b>${valor}</b><br>
+        Enquanto não pagares não podes reservar refeições nem usar a cantina, e as refeições que tinhas marcadas ficam suspensas.
+        Regulariza na cantina e voltam todas.
+      </div>`;
+  }
+  if(_bloqueio.desbloqueado){
+    return `
+      <div style="background:#e7f5ec;border:1px solid #a8d5b8;border-left:4px solid #2e7d32;border-radius:6px;
+                  padding:12px;margin-bottom:14px;color:#1e5b24;font-size:14px;text-align:left;">
+        🔓 A cantina levantou o bloqueio até ${formatarData(_bloqueio.ate)}.
+      </div>`;
+  }
+  return "";
+}
+
+const _BOTAO_BLOQUEADO = `<button style="opacity:0.5; cursor:not-allowed;" disabled>🔒 Valores em atraso</button>`;
+
 /* Estado do calendário de reservar refeição */
 let _menusAluno = [];              // menus disponíveis (>= hoje)
-let _reservasAtivasMenu = {};      // menu_id -> true (já reservado pelo aluno)
+let _reservasAtivasMenu = {};      // menu_id -> { automatico } (já reservado pelo aluno)
+let _reservasCanceladasMenu = {};  // menu_id -> { preco, tipo } (cancelado por si ou pela cantina; permite "Voltar a Reservar")
+let _reservasSuspensasMenu = {};   // menu_id -> true (suspensa pelo bloqueio - não foi o aluno, 011)
+let _alunoTemContrato = true;         // lido em showAlunoMenu; true é o comportamento de sempre (008)
+let _precoAlmocoSemContrato = null;   // configuracao.preco_almoco_sem_contrato (008)
 let _mesMenuView = null;           // primeiro dia do mês em visualização
 let _diaMenuSelecionado = null;    // data ISO do dia selecionado
 
@@ -39,12 +135,24 @@ async function showAlunoMenu() {
 
     const { data: reservas } = await supabaseClient
       .from("reservas")
-      .select("menu_id")
-      .eq("aluno_id", aluno.id)
-      .is("cancelamento_tipo", null);
+      .select("menu_id, ativa, cancelamento_tipo, automatico, preco")
+      .eq("aluno_id", aluno.id);
 
+    // Ativas → "Já reservado", guardando se foi automática para o cartão dizer
+    // a verdade. Canceladas por si OU pela mudança de contrato → botão "Voltar
+    // a Reservar": nas duas o aluno está a desfazer um cancelamento, e a RPC
+    // reservar_refeicao reativa ambas.
     _reservasAtivasMenu = {};
-    reservas?.forEach(r => _reservasAtivasMenu[r.menu_id] = true);
+    _reservasCanceladasMenu = {};
+    _reservasSuspensasMenu = {};
+    reservas?.forEach(r => {
+      if(r.ativa) _reservasAtivasMenu[r.menu_id] = { automatico: !!r.automatico };
+      else if(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") _reservasCanceladasMenu[r.menu_id] = { preco: Number(r.preco), tipo: r.cancelamento_tipo };
+      else if(r.cancelamento_tipo === "bloqueado") _reservasSuspensasMenu[r.menu_id] = true;
+    });
+
+    await _carregarTipoAluno(aluno.id);
+    await _carregarBloqueio(aluno.id);
 
     // Mês inicial: o do primeiro menu disponível, senão o atual
     if(!_mesMenuView){
@@ -148,10 +256,11 @@ function renderCalendarioMenu(){
   }
 
   container.innerHTML = `
+    ${_avisoBloqueio()}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesMenu(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesMenu(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES[mes]} ${ano}</b>
-      <button onclick="mudarMesMenu(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesMenu(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -164,12 +273,32 @@ function renderCalendarioMenu(){
 }
 
 // ---------------------------------------------------------------
+// PRAZO LIMITE DE UMA REFEIÇÃO (fonte única para reservar/cancelar/dieta)
+//   Pequeno-almoço: 23:00 do dia anterior.
+//   Almoço/Jantar:  9:00 do próprio dia da refeição.
+// Devolve um Date. Usar sempre isto — nunca comparar horas à mão — para
+// que reserva, cancelamento e troca de dieta não divirjam.
+function _prazoLimite(tipo, iso){
+  const dia = new Date(iso + "T00:00:00");
+  if(tipo === "pequeno_almoco"){
+    const limite = new Date(dia);
+    limite.setDate(limite.getDate() - 1);
+    limite.setHours(23, 0, 0, 0);
+    return limite;
+  }
+  const limite = new Date(dia);
+  limite.setHours(9, 0, 0, 0);
+  return limite;
+}
+
+// ---------------------------------------------------------------
 // REGRAS DE HORÁRIO PARA RESERVAR (centralizadas)
-//   Pequeno-almoço: nunca para hoje/passado; para dias futuros até
-//                   às 23:00 do dia anterior (logo, amanhã = 23:00 de hoje).
-//   Jantar:         hoje até às 9:00; amanhã até às 9:00 de hoje;
-//                   dias seguintes até às 9:00 do dia anterior.
-//   Almoço:         reservado automaticamente pela cantina.
+//   Pequeno-almoço: até às 23:00 do dia anterior (logo, nunca para hoje).
+//   Almoço/Jantar:  até às 9:00 do próprio dia da refeição.
+// O almoço é criado automaticamente pela cantina, mas quando foi cancelado
+// volta a ser reservável — e só até ao mesmo prazo em que podia ser cancelado.
+// Sem isto, um aluno cancelava o almoço de manhã e voltava a reservá-lo à tarde,
+// depois de a cantina já ter contado as refeições.
 // Devolve { pode, mensagem }.
 function _regraReserva(tipo, iso){
   const agora = new Date();
@@ -179,56 +308,56 @@ function _regraReserva(tipo, iso){
     return { pode:false, mensagem:" ⏰ (Data já passou)" };
   }
 
-  const diaMeal = new Date(iso + "T00:00:00");
-  const hojeD   = new Date(hoje + "T00:00:00");
-
-  if(tipo === "pequeno_almoco"){
-    // limite: 23:00 do dia anterior à refeição
-    const limite = new Date(diaMeal);
-    limite.setDate(limite.getDate() - 1);
-    limite.setHours(23, 0, 0, 0);
-    if(iso === hoje) return { pode:false, mensagem:" ⏰ (Só é possível reservar a partir do dia seguinte)" };
-    return { pode: agora < limite, mensagem: agora < limite ? "" : " ⏰ (Prazo ultrapassado - até às 23:00 do dia anterior)" };
+  // O prazo do pequeno-almoço para hoje já passou por definição (23:00 de ontem),
+  // mas a mensagem genérica confundiria — o aluno nunca poderia reservar hoje.
+  if(tipo === "pequeno_almoco" && iso === hoje){
+    return { pode:false, mensagem:" ⏰ (Só é possível reservar a partir do dia seguinte)" };
   }
 
-  if(tipo === "jantar"){
-    // limite: 9:00 do dia anterior, mas nunca antes de hoje 9:00
-    const anterior = new Date(diaMeal);
-    anterior.setDate(anterior.getDate() - 1);
-    const base = anterior < hojeD ? hojeD : anterior;
-    base.setHours(9, 0, 0, 0);
-    return { pode: agora < base, mensagem: agora < base ? "" : " ⏰ (Prazo ultrapassado - até às 9:00)" };
-  }
-
-  // almoço (automático) ou outros
-  return { pode:true, mensagem:"" };
+  const pode = agora < _prazoLimite(tipo, iso);
+  const mensagem = tipo === "pequeno_almoco"
+    ? " ⏰ (Prazo ultrapassado - até às 23:00 do dia anterior)"
+    : " ⏰ (Prazo ultrapassado - até às 9:00 do próprio dia)";
+  return { pode, mensagem: pode ? "" : mensagem };
 }
 
 // Cartões de reserva das refeições de um dia
 function _cartoesReservaDia(iso){
   const menusDia = _menusAluno.filter(m => m.data === iso);
-  if(!menusDia.length) return `<i>Sem menus neste dia.</i>`;
+  if(!menusDia.length) return `<div class="empty-state compacto"><div class="empty-state-icon">📭</div>Sem menus neste dia.</div>`;
+
+  // O preço que ESTE aluno paga, pelo mesmo critério do reservas_guard:
+  //  - uma reserva que o próprio cancelou e volta a marcar é reativada com o
+  //    preço congelado que a linha já tem;
+  //  - uma reserva cancelada pela cantina ao retirar o contrato, e uma reserva
+  //    nova, levam o preço de hoje: o do menu, salvo o almoço de quem não tem
+  //    contrato, que é o da configuração.
+  const precoHoje = m => _precoNovaMarcacao(m.tipo, m.preco);
+  const precoPara = m => {
+    const c = _reservasCanceladasMenu[m.id];
+    if(c && c.tipo === "user") return c.preco;
+    return precoHoje(m);
+  };
 
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
   menusDia.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9));
 
   return menusDia.map(m => {
-    // Almoço é reservado automaticamente quando o menu é criado
-    if(m.tipo === "almoco"){
-      return `
-        <div class="menu">
-          🍽️ <b>Almoço</b> — ${m.prato} (${formatCurrency(m.preco)})
-          <br><span style="color:#2e7d32;font-size:13px;">✅ Reservado automaticamente</span>
-        </div>
-      `;
-    }
-
+    // O almoço passa pela mesma lógica que as outras refeições: é criado
+    // automaticamente pela cantina, mas pode ter sido cancelado, e nesse caso
+    // esta página tem de o mostrar como reservável — não afirmar que está reservado.
     if(_reservasAtivasMenu[m.id]){
+      // A nota do automático lê o que está na base de dados (reservas.automatico)
+      // e não o tipo de refeição: um almoço marcado pelo próprio aluno não é
+      // automático, e dizer que é era o último resto do D10.
       return `
         <div class="menu">
           ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-          ${m.prato ? "— " + m.prato : ""} (${formatCurrency(m.preco)})
+          ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})
           <br><span style="color:#2e7d32;font-size:13px;">✅ Já reservado</span>
+          ${_reservasAtivasMenu[m.id].automatico ? `
+            <br><span style="color:#666;font-size:12px;">O almoço é reservado automaticamente pela cantina.</span>
+          ` : ""}
         </div>
       `;
     }
@@ -236,18 +365,28 @@ function _cartoesReservaDia(iso){
     const regra = _regraReserva(m.tipo, iso);
     const podeReservar = regra.pode;
     const mensagemHorario = regra.mensagem;
+    const foiCancelada = _reservasCanceladasMenu[m.id];
+    const rotuloBotao = foiCancelada ? "Voltar a Reservar" : "Reservar";
+    const notaCancelada = _reservasSuspensasMenu[m.id]
+      ? `<br><span style="color:#b35000;font-size:12px;">🔒 Suspensa — valores em atraso</span>`
+      : !foiCancelada ? "" : foiCancelada.tipo === "contrato"
+      ? `<br><span style="color:#856404;font-size:12px;">🏷️ Cancelada pela cantina (mudança de contrato)</span>`
+      : `<br><span style="color:#c62828;font-size:12px;">❌ Cancelaste esta reserva</span>`;
 
+    // O prazo ganha ao bloqueio: o prazo nunca se levanta, o bloqueio sim, e
+    // dizer "paga e podes reservar" de um jantar fora de prazo seria mentira.
     return `
       <div class="menu">
         ${emojiTipo(m.tipo)} <b>${formatarTipoRefeicao(m.tipo)}</b>
-        ${m.prato ? "— " + m.prato : ""} (${formatCurrency(m.preco)})${mensagemHorario}
+        ${m.prato ? "— " + escapeHtml(m.prato) : ""} (${formatCurrency(precoPara(m))})${mensagemHorario}
+        ${notaCancelada}
         <br>
-        ${podeReservar ? `
-          <button onclick="reservarAluno('${m.id}', ${m.preco}, '${m.data}', false, '${m.tipo}')">
-            Reservar
-          </button>
-        ` : `
+        ${!podeReservar ? `
           <button style="opacity:0.5; cursor:not-allowed;" disabled>❌ Prazo expirado</button>
+        ` : _bloqueio.bloqueado ? _BOTAO_BLOQUEADO : `
+          <button onclick="reservarAluno('${m.id}', '${m.data}', '${m.tipo}')">
+            ${rotuloBotao}
+          </button>
         `}
       </div>
     `;
@@ -258,7 +397,9 @@ function _cartoesReservaDia(iso){
    ALUNO — RESERVAR MENU
 ============================== */
 
-async function reservarAluno(menuId, preco, data, is_dieta, tipo) {
+const _MENSAGEM_RES11 = "Tens valores em atraso e por isso já não é possível reservar. Regulariza na cantina.";
+
+async function reservarAluno(menuId, data, tipo) {
   try {
     // Verificar regra de horário para fazer reserva (mesma lógica da UI)
     const regra = _regraReserva(tipo, data);
@@ -299,20 +440,38 @@ async function reservarAluno(menuId, preco, data, is_dieta, tipo) {
 
     //showLoading("⏳ Processando reserva...");
 
+    // O preço, o tipo e a data vêm do menu, dentro da função. Se já existir uma
+    // reserva cancelada para este aluno/dia/refeição, é reativada em vez de se
+    // criar uma segunda (era isto que permitia dois pequenos-almoços no mesmo dia).
     const { error } = await supabaseClient
-      .from("reservas")
-      .insert({
-        aluno_id: aluno.id,
-        menu_id: menuId,
-        data,
-        preco,
-        tipo,
-        is_dieta,
-        cancelamento_tipo: null
-      });
+      .rpc("reservar_refeicao", { p_menu_id: menuId });
 
     if (error) {
-      handleError(error, "Erro ao criar reserva");
+      if (error.code === "RES01") {
+        // Já existe reserva ativa: o ecrã estava dessincronizado. Recarregar em vez
+        // de insistir — o botão não devia estar visível.
+        await mostrarErro(
+          "Reserva já existente",
+          "Já tens esta refeição reservada para este dia. A lista foi atualizada."
+        );
+      } else if (error.code === "RES02") {
+        await mostrarErro(
+          "Refeição já liquidada",
+          "Esta refeição já foi paga e não pode ser reservada de novo. Fala com a cantina."
+        );
+      } else if (error.code === "RES11") {
+        // O bloqueio caiu entre o ecrã ser desenhado e o clique. Volta-se ao
+        // mesmo ecrã, que agora já mostra o aviso e os botões trancados.
+        await mostrarErro("Valores em atraso", _MENSAGEM_RES11);
+        showAlunoMenu();
+        return;
+      } else {
+        handleError(error, "Erro ao criar reserva");
+        return;
+      }
+      showAlunoMenu();
+      showAlunoReservas();
+      saldo();
       return;
     }
 
@@ -349,9 +508,10 @@ async function showAlunoReservas(){
         data,
         tipo,
         preco,
+        automatico,
         cancelamento_tipo,
         is_dieta,
-        menus!inner(prato)
+        menus!inner(prato, preco)
       `)
       .eq("aluno_id", aluno.id)
       .order("data", { ascending: true });
@@ -361,7 +521,22 @@ async function showAlunoReservas(){
       return;
     }
 
+    await _carregarTipoAluno(aluno.id);
+    await _carregarBloqueio(aluno.id);
+
     _reservasAluno = reservas || [];
+
+    // Os pedidos de cancelamento especial do próprio aluno. A política
+    // "Aluno vê os seus pedidos" (005 PASSO 2) já limita isto a ele, por isso
+    // não há filtro nenhum a acrescentar do lado do cliente.
+    const { data: pedidos, error: erroPedidos } = await supabaseClient
+      .from("cancelamentos_especiais")
+      .select("id, reserva_id, status, criado_em")
+      .order("criado_em", { ascending: false });
+
+    // Um erro aqui não pode derrubar o ecrã das reservas: sem pedidos, os
+    // cartões voltam ao comportamento anterior a este cluster.
+    _pedidosAluno = erroPedidos ? [] : (pedidos || []);
 
     if(!_mesReservasView){
       const h = new Date();
@@ -380,6 +555,7 @@ async function showAlunoReservas(){
 
 /* Estado do calendário de reservas do aluno */
 let _reservasAluno = [];
+let _pedidosAluno = [];           // cancelamentos especiais do próprio aluno
 let _mesReservasView = null;      // primeiro dia do mês em visualização
 let _diaReservaSelecionado = null; // data ISO do dia selecionado
 
@@ -403,6 +579,17 @@ function _badgeRefeicao(r){
     jantar:         { txt: "J", bg: "#f3e5f5", cor: "#6a1b9a" }
   };
   const m = map[r.tipo] || { txt: "?", bg: "#eee", cor: "#333" };
+  // Reserva cancelada: cinzento e riscado, para se distinguir de uma ativa.
+  // Teste explícito (não !_reservaAtiva) para a legenda, cujos objetos não têm
+  // cancelamento_tipo, não aparecer riscada.
+  if(r && (r.cancelamento_tipo === "user" || r.cancelamento_tipo === "payment" || r.cancelamento_tipo === "contrato")){
+    return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:#f0f0f0;color:#999;text-decoration:line-through;margin:1px;">${m.txt}</span>`;
+  }
+  // Suspensa pelo bloqueio (011): não foi cancelada por ninguém, está retida.
+  // Cor própria e sem risco, para não se ler como um cancelamento do aluno.
+  if(r && r.cancelamento_tipo === "bloqueado"){
+    return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:#ffe8cc;color:#b35000;border:1px dashed #e8590c;margin:1px;">${m.txt}</span>`;
+  }
   return `<span style="display:inline-block;font-size:10px;font-weight:800;line-height:1;padding:2px 5px;border-radius:6px;background:${m.bg};color:${m.cor};margin:1px;">${m.txt}</span>`;
 }
 
@@ -425,14 +612,14 @@ function renderMinhasReservas(){
   const ano = _mesReservasView.getFullYear();
   const mes = _mesReservasView.getMonth();
 
-  // Agrupar refeições ativas por dia
-  const ativasPorData = {};
+  // Agrupar TODAS as reservas por dia — inclusive as canceladas, para que um dia
+  // só com cancelamentos continue a ser selecionável e o aluno possa lá reativar.
+  const reservasPorData = {};
   _reservasAluno.forEach(r => {
-    if(!_reservaAtiva(r)) return;
-    (ativasPorData[r.data] = ativasPorData[r.data] || []).push(r);
+    (reservasPorData[r.data] = reservasPorData[r.data] || []).push(r);
   });
   const ordemTipo = { pequeno_almoco: 0, almoco: 1, jantar: 2 };
-  Object.values(ativasPorData).forEach(arr =>
+  Object.values(reservasPorData).forEach(arr =>
     arr.sort((a,b)=> (ordemTipo[a.tipo]??9) - (ordemTipo[b.tipo]??9))
   );
 
@@ -449,16 +636,20 @@ function renderMinhasReservas(){
   }
   for(let dia = 1; dia <= diasNoMes; dia++){
     const iso = `${ano}-${_pad2(mes+1)}-${_pad2(dia)}`;
-    const refeicoes = ativasPorData[iso] || [];
+    const refeicoes = reservasPorData[iso] || [];
     const temReservas = refeicoes.length > 0;
+    const temAtivas = refeicoes.some(_reservaAtiva);
     const isHoje = iso === hojeISO;
     const isSel = iso === _diaReservaSelecionado;
 
     const badges = refeicoes.map(_badgeRefeicao).join("");
 
-    const fundo = isSel ? "#fff3cd" : (temReservas ? "#ffffff" : "transparent");
+    // Dia só com cancelamentos: selecionável na mesma (para reativar), mas
+    // apresentado como "gasto" — sem o realce verde de um dia com reservas ativas.
+    const fundo = isSel ? "#fff3cd" : (temAtivas ? "#ffffff" : "transparent");
     const borda = isSel ? "2px solid #ffc107"
-                 : temReservas ? "1px solid #c8e6c9"
+                 : temAtivas ? "1px solid #c8e6c9"
+                 : temReservas ? "1px dashed #e0b3b3"
                  : "1px solid transparent";
 
     celulas += `
@@ -491,9 +682,9 @@ function renderMinhasReservas(){
 
   container.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-      <button onclick="mudarMesReservas(-1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">‹</button>
+      <button class="cal-nav" onclick="mudarMesReservas(-1)">‹</button>
       <b style="font-size:16px;">${_NOMES_MESES[mes]} ${ano}</b>
-      <button onclick="mudarMesReservas(1)" style="border:none;background:#f0f0f0;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;">›</button>
+      <button class="cal-nav" onclick="mudarMesReservas(1)">›</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;margin-bottom:6px;">
       ${diasSemana.map(d => `<div style="font-size:11px;font-weight:700;color:#888;">${d}</div>`).join("")}
@@ -510,15 +701,21 @@ function renderMinhasReservas(){
   `;
 }
 
-// Contexto necessário para decidir se uma reserva pode ser cancelada/dieta
+// Contexto necessário para decidir se uma reserva pode ser cancelada/dieta.
+// Os prazos não vivem aqui — vêm de _prazoLimite(), avaliado por cartão.
+//
+// O limite mensal é a exceção a uma OBRIGAÇÃO: o contrato completo obriga ao
+// almoço e deixa cancelar dois por mês. Só conta, portanto, o almoço que o
+// contrato marcou sozinho — reservas.automatico. Um almoço marcado à mão pelo
+// aluno nunca foi obrigado, e é o único que os contratos parcial e sem têm.
+//
+// Lê-se da LINHA, não do tipo de contrato de hoje: o automatico é congelado
+// pelo reservas_guard e continua a dizer o que dizia no dia em que o almoço
+// nasceu. É por isso que mudar de tipo a meio do mês não precisa de nada.
 function _contextoReservas(){
-  const agora = new Date();
-  const hoje = agora.toISOString().split("T")[0];
-  const hora = agora.getHours();
-
   const cancelamentosUsuarioMesAlmoco = {};
   _reservasAluno.forEach(r => {
-    if(r.tipo === "almoco" && r.cancelamento_tipo === "user"){
+    if(r.tipo === "almoco" && r.cancelamento_tipo === "user" && r.automatico){
       const d = new Date(r.data);
       const key = `${d.getFullYear()}-${d.getMonth()+1}`;
       cancelamentosUsuarioMesAlmoco[key] = (cancelamentosUsuarioMesAlmoco[key] || 0) + 1;
@@ -532,49 +729,78 @@ function _contextoReservas(){
     reservasPorMenu[r.data][r.tipo].push(r);
   });
 
-  return { hoje, hora, cancelamentosUsuarioMesAlmoco, reservasPorMenu };
+  const pedidosPorReserva = {};
+  _pedidosAluno.forEach(p => {
+    (pedidosPorReserva[p.reserva_id] = pedidosPorReserva[p.reserva_id] || []).push(p);
+  });
+
+  return { cancelamentosUsuarioMesAlmoco, reservasPorMenu, pedidosPorReserva };
 }
 
 // Cartão individual de uma reserva (com ações: cancelar / dieta / reativar)
 function _cartaoReserva(r, ctx){
-  const { hoje, hora, cancelamentosUsuarioMesAlmoco, reservasPorMenu } = ctx;
+  const { cancelamentosUsuarioMesAlmoco, reservasPorMenu, pedidosPorReserva } = ctx;
   const d = new Date(r.data);
   const keyMes = `${d.getFullYear()}-${d.getMonth()+1}`;
+
+  // Mesmo prazo que governa a reserva — pequeno-almoço 23:00 da véspera,
+  // almoço/jantar 9:00 do próprio dia.
+  const dentroPrazo = new Date() < _prazoLimite(r.tipo, r.data);
 
   const estaAtiva = r.cancelamento_tipo === null || r.cancelamento_tipo === "reactivated";
   let podeCancelar = false;
   let podeDieta = false;
 
-  if(estaAtiva){
-    if(r.tipo === "pequeno_almoco"){
-      // ontem: não; hoje: até 9:00; amanhã e futuro: sim
-      if(r.data > hoje || (r.data === hoje && hora < 9)) podeCancelar = true;
-    }
+  if(estaAtiva && dentroPrazo){
     if(r.tipo === "almoco"){
-      if(r.data > hoje || (r.data === hoje && hora < 9)){
-        const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
-        const reservasDia = (reservasPorMenu[r.data] && reservasPorMenu[r.data][r.tipo]) || [];
-        const jaCancelou = reservasDia.filter(x=>x.cancelamento_tipo === "user").length;
-        if(jaCancelou < 1 && cancelamentosAtuais < 2) podeCancelar = true;
-        podeDieta = true;
-      }
-    }
-    if(r.tipo === "jantar"){
-      // ontem: não; hoje: até 9:00; amanhã e futuro: sim
-      if(r.data > hoje || (r.data === hoje && hora < 9)) podeCancelar = true;
+      const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
+      const reservasDia = (reservasPorMenu[r.data] && reservasPorMenu[r.data][r.tipo]) || [];
+      const jaCancelou = reservasDia.filter(x=>x.cancelamento_tipo === "user").length;
+      // Simétrico do _contextoReservas: o limite só BLOQUEIA o almoço obrigado.
+      // Um almoço marcado à mão cancela-se dentro do prazo, diga a conta do mês
+      // o que disser — é o caso do aluno que voltou a completo e marcou sozinho
+      // os almoços que o fan-out já não lhe deu.
+      if(jaCancelou < 1 && (!r.automatico || cancelamentosAtuais < 2)) podeCancelar = true;
+      podeDieta = true;
+    } else {
+      podeCancelar = true;
     }
   }
 
   const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
   const mostrarAvisoLimite = r.tipo === "almoco" && !podeCancelar && estaAtiva && cancelamentosAtuais >= 2;
 
+  // Pendente ganha ao rejeitado: é o estado atual. 'aprovado' não mostra nada —
+  // a própria reserva já mostra o resultado (cancelada, ou com o ícone de dieta).
+  const pedidos = (pedidosPorReserva && pedidosPorReserva[r.id]) || [];
+  const pedido = pedidos.find(p => p.status === "pendente")
+              || pedidos.find(p => p.status === "rejeitado");
+
+  // O preço no cartão. Uma reserva cancelada pela cantina ao retirar o contrato
+  // volta a marcar-se ao preço de HOJE (decisão de 2026-09-04) - é esse que se
+  // mostra, e não o congelado na linha, para o que se vê ser o que se cobra.
+  const precoCard = r.cancelamento_tipo === "contrato"
+    ? _precoNovaMarcacao(r.tipo, r.menus?.preco ?? r.preco)
+    : Number(r.preco);
+  const notaPreco = r.cancelamento_tipo === "contrato"
+    ? `<div style="color:#888; font-size:11px; margin-left:28px;">preço ao voltar a marcar</div>`
+    : "";
+
   let statusBg = "#f8f9fa", statusBorda = "#007bff", statusTexto = "✅ Ativa", statusCor = "#28a745";
   if(r.cancelamento_tipo === "user"){
     statusBg = "#f8d7da"; statusBorda = "#dc3545"; statusTexto = "❌ Cancelada por si"; statusCor = "#dc3545";
+  } else if(r.cancelamento_tipo === "contrato"){
+    // Cancelada pela cantina ao retirar o contrato (008). Não é do aluno, por
+    // isso não conta para o limite de cancelamentos - ver _contextoReservas.
+    statusBg = "#fff3cd"; statusBorda = "#856404"; statusTexto = "🏷️ Cancelada pela cantina (mudança de contrato)"; statusCor = "#856404";
   } else if(r.cancelamento_tipo === "payment"){
     statusBg = "#e7d4f5"; statusBorda = "#6f42c1"; statusTexto = "💳 Paga (liquidação do mês)"; statusCor = "#6f42c1";
   } else if(r.cancelamento_tipo === "reactivated"){
     statusBg = "#d1ecf1"; statusBorda = "#0c5460"; statusTexto = "🔄 Reativada"; statusCor = "#0c5460";
+  } else if(r.cancelamento_tipo === "bloqueado"){
+    // Suspensa pelo bloqueio (011). Não é do aluno e não gasta os dois
+    // cancelamentos do mês; volta sozinha quando a dívida for paga.
+    statusBg = "#fff4e5"; statusBorda = "#e8590c"; statusTexto = "🔒 Suspensa — valores em atraso"; statusCor = "#b35000";
   }
 
   return `
@@ -585,29 +811,50 @@ function _cartaoReserva(r, ctx){
             <span style="font-size:20px;">${emojiTipo(r.tipo, r.is_dieta)}</span>
             <span style="font-weight:bold; color:#333;">${r.tipo === "almoco" && r.is_dieta ? "Almoço (Dieta)" : formatarTipoRefeicao(r.tipo)}</span>
           </div>
-          <div style="color:#666; font-size:13px; margin-left:28px;">
-            ${r.menus?.prato ? `${r.menus.prato}` : "-"}
-            <span style="float:right; color:#007bff; font-weight:bold;">${formatCurrency(r.preco).replace("€", "")}€</span>
+          <div style="color:#666; font-size:13px; margin-left:28px; display:flex; justify-content:space-between; gap:8px;">
+            <span>${r.menus?.prato ? escapeHtml(r.menus.prato) : "-"}</span>
+            <span style="color:#007bff; font-weight:bold; white-space:nowrap;">${formatCurrency(precoCard)}</span>
           </div>
+          ${notaPreco}
           <div style="color:${statusCor}; font-size:12px; margin-top:4px; margin-left:28px;">${statusTexto}</div>
+          ${podeDieta ? `
+            <button onclick="trocarDieta('${r.id}', ${!r.is_dieta})"
+                    style="margin-top:8px; margin-left:28px; padding:6px 12px; font-size:12px; text-transform:none; letter-spacing:0; box-shadow:none;
+                           background:${r.is_dieta ? "#e2e3e5" : "#fff3cd"}; color:#333;
+                           border:1px solid ${r.is_dieta ? "#6c757d" : "#ffc107"}; border-radius:4px; cursor:pointer;">
+              ${r.is_dieta ? "🍽️ Mudar para Normal" : "🥗 Mudar para Dieta"}
+            </button>
+          ` : ""}
         </div>
-        ${podeDieta && !r.is_dieta ? `
-          <button onclick="trocarParaDieta('${r.id}')" style="padding:6px 10px; font-size:12px; background:#fff3cd; border:1px solid #ffc107; border-radius:4px; cursor:pointer;">
-            🥗 Dieta
-          </button>
-        ` : ""}
       </div>
       ${podeCancelar ? `
         <button onclick="cancelarReserva('${r.id}', '${keyMes}')" style="margin-top:8px; width:100%; padding:8px; background:#dc3545; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
           Cancelar Reserva
         </button>
       ` : ""}
-      ${r.cancelamento_tipo === "user" && r.data > hoje ? `
-        <button onclick="reativarReserva('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
-          🔄 Reativar (marcar como ativa novamente)
+      ${(r.cancelamento_tipo === "user" || r.cancelamento_tipo === "contrato") && dentroPrazo ? (_bloqueio.bloqueado ? `
+        <button disabled style="margin-top:8px; width:100%; padding:8px; background:#6c757d; color:white; border:none; border-radius:4px; opacity:0.6; cursor:not-allowed; font-weight:bold;">
+          🔒 Valores em atraso
         </button>
-      ` : ""}
+      ` : `
+        <button onclick="reativarReserva('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#28a745; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
+          Voltar a Reservar
+        </button>
+      `) : ""}
       ${mostrarAvisoLimite ? `
+        ${pedido ? `
+          <div style="margin-top:8px; padding:8px; border-radius:4px; font-size:13px; font-weight:bold; ${
+            pedido.status === "pendente"
+              ? "background:#e2e3e5; border:1px solid #6c757d; color:#41464b;"
+              : "background:#f8d7da; border:1px solid #dc3545; color:#842029;"
+          }">
+            ${pedido.status === "pendente" ? "⏳ Pedido pendente" : "❌ Pedido rejeitado"}
+          </div>
+        ` : `
+          <button onclick="pedirCancelamentoEspecial('${r.id}')" style="margin-top:8px; width:100%; padding:8px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">
+            📩 Pedir cancelamento especial
+          </button>
+        `}
         <div style="margin-top:8px; padding:8px; background-color:#fff3cd; border:1px solid #ffc107; border-radius:4px; color:#856404; font-size:13px;">
           ⚠️ Para conseguires cancelar liga à cantina - 914117705
         </div>
@@ -652,19 +899,69 @@ async function cancelarReserva(reservaId, keyMes) {
   }
 }
 
-async function trocarParaDieta(reservaId) {
+// Pedido de cancelamento especial. So aparece quando o limite mensal ja foi
+// gasto - o prazo das 9:00 nao tem excecao nenhuma e nao chega aqui.
+async function pedirCancelamentoEspecial(reservaId) {
+  const r = await showModal({
+    icon: "📩",
+    type: "warning",
+    title: "Pedir Cancelamento Especial",
+    message: "Já usaste os 2 cancelamentos deste mês. Explica a situação e a cantina decide.",
+    fields: [
+      { id: "motivo",           type: "textarea", label: "Motivo", required: true },
+      { id: "trocaPorLanche",   type: "checkbox", label: "Prefiro trocar por um lanche" },
+      { id: "lancheSubstituto", type: "text",     label: "Qual lanche?", revealedBy: "trocaPorLanche" }
+    ],
+    buttons: [
+      { text: "Voltar",        type: "secondary", resolve: false },
+      { text: "Enviar pedido", type: "primary",   resolve: true  }
+    ]
+  });
+
+  if (!r) return;   // null = Voltar ou clique fora. Falha fechada.
+
+  showLoading("⏳ A enviar pedido...");
+
+  try {
+    const { error } = await supabaseClient.rpc("solicitar_cancelamento_especial", {
+      p_reserva_id: reservaId,
+      p_motivo: r.motivo,
+      p_troca_por_lanche: !!r.trocaPorLanche,
+      p_lanche_substituto: r.trocaPorLanche ? (r.lancheSubstituto || null) : null
+    });
+
+    hideLoading();
+
+    if (error) {
+      // "Já existe um pedido pendente" quer dizer ecrã desatualizado: recarregar,
+      // não insistir. Mesma forma que o RES01 do Cluster 1.
+      await mostrarErro("Erro ao Enviar Pedido", error.message || "Erro inesperado");
+      showAlunoReservas();
+      return;
+    }
+
+    await mostrarSucesso("Pedido Enviado", "A cantina vai analisar o teu pedido.");
+    showAlunoReservas();
+  } catch (err) {
+    await mostrarErro("Erro", err?.message || "Erro inesperado ao enviar pedido");
+  } finally {
+    hideLoading();
+  }
+}
+
+// Troca reversível nos dois sentidos, até ao prazo do almoço (9:00 do próprio dia).
+async function trocarDieta(reservaId, paraDieta) {
   if (!await confirmar(
-    "Alterar para Dieta",
-    "Depois de escolher dieta não poderá voltar a alterar. Deseja continuar?"
+    "Alterar Almoço",
+    paraDieta ? "Mudar para Dieta?" : "Voltar a Prato Normal?"
   )) {
     return;
   }
 
-
   try {
     const { error } = await supabaseClient
       .from("reservas")
-      .update({ is_dieta: true })
+      .update({ is_dieta: paraDieta })
       .eq("id", reservaId);
 
     if (error) {
@@ -673,8 +970,8 @@ async function trocarParaDieta(reservaId) {
     }
 
     await mostrarSucesso(
-      "Refeição Alterada",
-      "Almoço alterado para dieta com sucesso!"
+      "Almoço Alterado",
+      paraDieta ? "Almoço alterado para dieta." : "Almoço alterado para prato normal."
     );
 
     showAlunoReservas();
@@ -706,15 +1003,31 @@ async function reativarReserva(reservaId) {
   showLoading("⏳ Reativando reserva...");
 
   try {
-    const { error } = await supabaseClient
-      .from("reservas")
-      .update({ cancelamento_tipo: 'reactivated' })
-      .eq("id", reservaId);
+    const { data, error } = await supabaseClient
+      .rpc("reativar_reserva_cancelada", { p_reserva_id: reservaId });
 
     if (error) {
       hideLoading();
+      if (error.code === "RES11") {
+        // Mesma corrida que no reservarAluno: o bloqueio caiu depois do render.
+        await mostrarErro("Valores em atraso", _MENSAGEM_RES11);
+        showAlunoReservas();
+        return;
+      }
       const mensagemErro = error?.message || "Erro ao reativar reserva";
       await mostrarErro("Erro ao Reativar Reserva", mensagemErro);
+      return;
+    }
+
+    // A função devolve (success, message) em vez de lançar erro.
+    const resultado = data && data[0];
+    if (!resultado || !resultado.success) {
+      hideLoading();
+      await mostrarErro(
+        "Erro ao Reativar Reserva",
+        resultado?.message || "Esta reserva não pode ser reativada."
+      );
+      showAlunoReservas();
       return;
     }
 
@@ -866,7 +1179,7 @@ async function showNotificacoes() {
     const container = document.getElementById("listaNotificacoes");
     
     if (!notificacoes || notificacoes.length === 0) {
-      container.innerHTML = '<p style="text-align:center;color:#888;">Nenhuma notificação</p>';
+      container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔔</div>Nenhuma notificação</div>';
       hideLoading();
       return;
     }
@@ -944,3 +1257,59 @@ async function marcarTodasNotificacoesLidas() {
 }
 
 
+
+/* ==============================
+   ALUNO — O MEU CÓDIGO
+============================== */
+
+// Os seis dígitos aparecem por baixo do código de barras em letra grande, e não
+// são decoração: são o plano B para um telemóvel sem bateria, um ecrã partido,
+// ou um leitor laser que não lê ecrãs. Quem está ao balcão lê-os em voz alta ou
+// escreve-os à mão. Ver o risco adiado em backlog.md.
+async function showMeuCodigo(){
+  show("alunoCodigo");
+  const div = document.getElementById("meuCodigo");
+  div.innerHTML = "⏳ A carregar...";
+
+  try {
+    const aluno = await getAlunoAtual();
+
+    const { data, error } = await supabaseClient
+      .from("alunos")
+      .select("codigo")
+      .eq("id", aluno.id)
+      .single();
+
+    if (error || !data || !data.codigo) {
+      div.innerHTML = "<i>❌ Não foi possível obter o teu código.</i>";
+      return;
+    }
+
+    div.innerHTML = `
+      <div style="font-size:18px;font-weight:700;margin-bottom:16px;">
+        ${escapeHtml(aluno.nome)}
+      </div>
+      <div style="background:#fff;padding:20px;border-radius:12px;display:inline-block;">
+        <svg id="svgCodigoBarras"></svg>
+      </div>
+      <div style="font-size:34px;font-weight:800;letter-spacing:6px;margin-top:14px;
+                  font-family:monospace;">
+        ${escapeHtml(data.codigo)}
+      </div>
+      <div style="color:#666;font-size:13px;margin-top:10px;">
+        Mostra este código na cantina.
+      </div>
+    `;
+
+    JsBarcode("#svgCodigoBarras", data.codigo, {
+      format: "CODE128",
+      width: 3,
+      height: 110,
+      displayValue: false,
+      margin: 0
+    });
+  } catch (err) {
+    console.error("❌ Erro ao carregar o código do aluno", err);
+    div.innerHTML = "<i>❌ Não foi possível obter o teu código.</i>";
+  }
+}
