@@ -24,13 +24,14 @@ WITH j AS (
   SELECT jobname || ' | ' || schedule || ' | ' || active || ' | ' || btrim(command) AS j
   FROM cron.job WHERE jobname IN ('fechar-mes', 'avisos-inicial', 'avisos-atraso'))
 INSERT INTO _verificacao (verificacao, obtido, esperado, ok)
-SELECT '2) as tres tarefas', string_agg(j, '; ' ORDER BY j),
-       'avisos-atraso | 0 8 11 * * | true | SELECT gerar_avisos_pagamento(''atraso''); '
-       || 'avisos-inicial | 0 8 1 * * | true | SELECT gerar_avisos_pagamento(''inicial''); '
+-- Separador ' // ': os comandos ja acabam em ';', e com '; ' ficava ';;'.
+SELECT '2) as tres tarefas', string_agg(j, ' // ' ORDER BY j),
+       'avisos-atraso | 0 8 11 * * | true | SELECT gerar_avisos_pagamento(''atraso''); // '
+       || 'avisos-inicial | 0 8 1 * * | true | SELECT gerar_avisos_pagamento(''inicial''); // '
        || 'fechar-mes | 0 1 1 * * | true | SELECT fechar_mes_anterior();',
-       string_agg(j, '; ' ORDER BY j) =
-       'avisos-atraso | 0 8 11 * * | true | SELECT gerar_avisos_pagamento(''atraso''); '
-       || 'avisos-inicial | 0 8 1 * * | true | SELECT gerar_avisos_pagamento(''inicial''); '
+       string_agg(j, ' // ' ORDER BY j) =
+       'avisos-atraso | 0 8 11 * * | true | SELECT gerar_avisos_pagamento(''atraso''); // '
+       || 'avisos-inicial | 0 8 1 * * | true | SELECT gerar_avisos_pagamento(''inicial''); // '
        || 'fechar-mes | 0 1 1 * * | true | SELECT fechar_mes_anterior();'
 FROM j;
 
@@ -78,21 +79,29 @@ VALUES ('5) as tarefas disparam mesmo', 'so depois do dia 1 as 01:00 UTC',
         'SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10; -> succeeded', NULL);
 
 -- ---------------------------------------------------------------- PASSO 4 ---
--- Nas duas primeiras NAO pode aparecer o PUBLIC (=X/postgres sozinho) nem anon
--- nem authenticated. Nas duas ultimas anon e authenticated TEM de continuar.
+-- Nas duas primeiras anon e authenticated NAO podem executar. Nas duas ultimas
+-- TEM de continuar a poder, senao o REVOKE foi longe demais.
+-- Decide-se pelo que o Postgres deixa MESMO fazer (has_function_privilege), nao
+-- pelo texto da ACL: uma ACL vazia quer dizer "PUBLIC executa", o que ja inclui
+-- anon e authenticated. No projeto da escola as duas ultimas tem a ACL vazia;
+-- na copia de testes tem anon=X e authenticated=X escritos. O efeito e o mesmo.
 WITH f AS (
-  SELECT proname, coalesce(proacl::text, '') AS acl
+  SELECT oid, proname, coalesce(proacl::text, '') AS acl,
+         has_function_privilege('anon', oid, 'EXECUTE') AS anon,
+         has_function_privilege('authenticated', oid, 'EXECUTE') AS auth
   FROM pg_proc
   WHERE pronamespace = 'public'::regnamespace
     AND proname IN ('fechar_mes_anterior', 'gerar_avisos_pagamento', 'liquidar_mes_divida', 'reservar_refeicao'))
 INSERT INTO _verificacao (verificacao, obtido, esperado, ok)
-SELECT 'P4.1) EXECUTE: ' || proname, CASE WHEN acl = '' THEN '(por omissao: PUBLIC)' ELSE acl END,
+SELECT 'P4.1) EXECUTE: ' || proname,
+       'anon ' || anon || ', authenticated ' || auth
+       || '  [' || CASE WHEN acl = '' THEN 'ACL vazia: PUBLIC' ELSE acl END || ']',
        CASE WHEN proname IN ('fechar_mes_anterior', 'gerar_avisos_pagamento')
-            THEN 'so postgres e service_role'
-            ELSE 'com anon=X e authenticated=X' END,
+            THEN 'anon false, authenticated false'
+            ELSE 'anon true, authenticated true' END,
        CASE WHEN proname IN ('fechar_mes_anterior', 'gerar_avisos_pagamento')
-            THEN acl <> '' AND acl NOT LIKE '%anon=%' AND acl NOT LIKE '%authenticated=%' AND acl !~ '(^\{|,)=X'
-            ELSE acl LIKE '%anon=X%' AND acl LIKE '%authenticated=X%' END
+            THEN NOT anon AND NOT auth
+            ELSE anon AND auth END
 FROM f;
 
 INSERT INTO _verificacao (verificacao, obtido, esperado, ok)
