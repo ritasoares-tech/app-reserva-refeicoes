@@ -6,7 +6,9 @@
 --
 -- O ponto 2 insere um aluno de teste para ver o trigger a funcionar e DESFAZ
 -- tudo dentro do proprio script (a insercao corre num bloco que termina com um
--- erro de proposito). Nao fica aluno nenhum nem reserva nenhuma.
+-- erro de proposito). Nao fica aluno nenhum nem reserva nenhuma. Se nao houver
+-- almocos futuros, cria tambem um almoco temporario no mesmo bloco, desfeito
+-- da mesma maneira.
 -- =============================================================================
 
 DROP TABLE IF EXISTS pg_temp._verificacao;
@@ -20,13 +22,30 @@ DECLARE
   v_hoje     date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
   v_antes_9  boolean := (now() AT TIME ZONE 'Europe/Lisbon')::time < time '09:00';
   v_esperado int;
+  v_reais    int;
+  v_data_teste date;
   v_obtido   int;
   v_erro     text;
 BEGIN
   SELECT count(*) INTO v_esperado FROM menus
   WHERE tipo = 'almoco' AND (data > v_hoje OR (data = v_hoje AND v_antes_9));
+  v_reais := v_esperado;
 
   BEGIN
+    -- Sem almocos futuros o teste nao prova nada. Cria-se um almoco temporario
+    -- no proximo dia util sem almoco; o trigger dos menus da-o aos alunos que
+    -- ja existem, e tudo - menu e essas reservas - e desfeito com o resto.
+    IF v_esperado = 0 THEN
+      SELECT min(d)::date INTO v_data_teste
+      FROM generate_series(v_hoje + 1, v_hoje + 60, interval '1 day') AS d
+      WHERE extract(isodow FROM d) < 6
+        AND NOT EXISTS (SELECT 1 FROM menus m WHERE m.tipo = 'almoco' AND m.data = d::date);
+      INSERT INTO menus (data, tipo, prato, preco)
+      VALUES (v_data_teste, 'almoco', 'Teste verificacao 002', 0);
+      SELECT count(*) INTO v_esperado FROM menus
+      WHERE tipo = 'almoco' AND (data > v_hoje OR (data = v_hoje AND v_antes_9));
+    END IF;
+
     INSERT INTO alunos (id, nome, email)
     VALUES (gen_random_uuid(), 'Teste Trigger', 'teste-trigger@example.org');
     SELECT count(*) INTO v_obtido
@@ -39,15 +58,14 @@ BEGIN
   END;
 
   INSERT INTO _verificacao (verificacao, obtido, esperado, ok) VALUES
-    ('1) almocos que um aluno novo deve receber', v_esperado::text,
+    ('1) almocos que um aluno novo deve receber', v_reais::text,
      'numero de almocos de amanha em diante (+ hoje, antes das 9:00)', NULL),
     ('2) reservas criadas para um aluno de teste (desfeito)',
-     CASE WHEN v_esperado = 0 AND v_erro IS NULL
-          THEN 'sem almocos futuros: criar um menu de almoco e correr outra vez'
-          ELSE coalesce(v_erro, v_obtido::text) END,
+     coalesce(v_erro, v_obtido::text)
+       || CASE WHEN v_data_teste IS NOT NULL
+               THEN ' (com um almoco temporario em ' || v_data_teste || ', desfeito)' ELSE '' END,
      v_esperado::text,
-     CASE WHEN v_esperado = 0 AND v_erro IS NULL THEN NULL
-          ELSE v_erro IS NULL AND v_obtido = v_esperado END);
+     v_erro IS NULL AND v_obtido = v_esperado);
 END $$;
 
 INSERT INTO _verificacao (verificacao, obtido, esperado, ok)
