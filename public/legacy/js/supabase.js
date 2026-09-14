@@ -21,8 +21,8 @@
 // =============================================================================
 
 // --- TESTES (trocar no ultimo commit antes do merge) -------------------------
-const SUPABASE_URL = "https://mtbjlagltbkuqhunayxy.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im10YmpsYWdsdGJrdXFodW5heXh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3MzQwNjIsImV4cCI6MjEwMDMxMDA2Mn0.y1sV57xZBOWrpkEB7xkIzVpDiMZVbAvOXczxBg46yvE";
+const SUPABASE_URL = "https://fghsgknistganzbuxrjt.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnaHNna25pc3RnYW56YnV4cmp0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgyNDUzNjcsImV4cCI6MjA4MzgyMTM2N30.6NPsu-DeQuEpjnHptdZTgsYmtx7mQ5STs8zbwYgIoYY";
 const _BD_ESCOLA_REF = "fghsgknistganzbuxrjt";   // para o aviso na consola
 // -----------------------------------------------------------------------------
 
