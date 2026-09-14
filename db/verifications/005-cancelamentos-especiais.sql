@@ -6,7 +6,8 @@
 --
 -- O passo 4 cria um pedido pendente para chamar a listar_solicitacoes_pendentes
 -- COM LINHAS la dentro, e DESFAZ-O dentro do proprio script. Precisa de uma
--- reserva de almoco ativa; sem nenhuma diz "sem almoco ativo para testar".
+-- reserva de almoco ativa; sem nenhuma cria um almoco temporario no mesmo
+-- bloco, desfeito da mesma maneira.
 -- =============================================================================
 
 DROP TABLE IF EXISTS pg_temp._verificacao;
@@ -56,11 +57,24 @@ FROM f;
 -- ---------------------------------------------------------------- PASSO 4 ---
 -- Antes deste passo isto dava 42804 em vez de devolver a linha.
 DO $$
-DECLARE v_linhas int; v_c30 int; v_erro text; v_sem boolean;
+DECLARE v_linhas int; v_c30 int; v_erro text; v_sem boolean; v_data_teste date;
+  v_hoje date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
 BEGIN
-  v_sem := NOT EXISTS (SELECT 1 FROM reservas WHERE tipo = 'almoco' AND ativa);
+  v_sem := NOT EXISTS (SELECT 1 FROM alunos);
   IF NOT v_sem THEN
     BEGIN
+      -- Sem reserva de almoco ativa, cria-se um almoco temporario no proximo dia
+      -- util sem almoco; o trigger dos menus da-o aos alunos. Menu, reservas e
+      -- pedido sao desfeitos juntos, no fim do bloco.
+      IF NOT EXISTS (SELECT 1 FROM reservas WHERE tipo = 'almoco' AND ativa) THEN
+        SELECT min(d)::date INTO v_data_teste
+        FROM generate_series(v_hoje + 1, v_hoje + 60, interval '1 day') AS d
+        WHERE extract(isodow FROM d) < 6
+          AND NOT EXISTS (SELECT 1 FROM menus m WHERE m.tipo = 'almoco' AND m.data = d::date);
+        INSERT INTO menus (data, tipo, prato, preco)
+        VALUES (v_data_teste, 'almoco', 'Teste verificacao 005', 0);
+      END IF;
+
       INSERT INTO cancelamentos_especiais (aluno_id, reserva_id, motivo, status)
       SELECT r.aluno_id, r.id, 'Teste do cast', 'pendente'
       FROM reservas r WHERE r.tipo = 'almoco' AND r.ativa LIMIT 1;
@@ -77,8 +91,10 @@ BEGIN
 
   INSERT INTO _verificacao (verificacao, obtido, esperado, ok) VALUES
     ('P4) listar_solicitacoes_pendentes com um pedido (desfeito)',
-     CASE WHEN v_sem THEN 'sem almoco ativo para testar'
-          ELSE coalesce(v_erro, v_linhas || ' linha(s), cancelamentos_30_dias = ' || v_c30) END,
+     CASE WHEN v_sem THEN 'sem alunos para testar'
+          ELSE coalesce(v_erro, v_linhas || ' linha(s), cancelamentos_30_dias = ' || v_c30)
+               || CASE WHEN v_data_teste IS NOT NULL
+                       THEN ' (com um almoco temporario em ' || v_data_teste || ', desfeito)' ELSE '' END END,
      '1 linha(s), cancelamentos_30_dias = 0',
      CASE WHEN v_sem THEN NULL ELSE v_erro IS NULL AND v_linhas = 1 AND v_c30 = 0 END);
 END $$;
