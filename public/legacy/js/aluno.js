@@ -1262,6 +1262,13 @@ async function marcarTodasNotificacoesLidas() {
    ALUNO — O MEU CÓDIGO
 ============================== */
 
+// Os rótulos do contrato no ecrã do código, por baixo do nome do aluno.
+const _ROTULO_CONTRATO_ALUNO = {
+  completo: "Contrato Completo",
+  parcial:  "Contrato €40",
+  sem:      "Sem Contrato"
+};
+
 // Os seis dígitos aparecem por baixo do código de barras em letra grande, e não
 // são decoração: são o plano B para um telemóvel sem bateria, um ecrã partido,
 // ou um leitor laser que não lê ecrãs. Quem está ao balcão lê-os em voz alta ou
@@ -1276,7 +1283,7 @@ async function showMeuCodigo(){
 
     const { data, error } = await supabaseClient
       .from("alunos")
-      .select("codigo")
+      .select("codigo, tipo_contrato")
       .eq("id", aluno.id)
       .single();
 
@@ -1285,10 +1292,15 @@ async function showMeuCodigo(){
       return;
     }
 
+    const contrato = _ROTULO_CONTRATO_ALUNO[data.tipo_contrato];
+
     div.innerHTML = `
       <div style="font-size:18px;font-weight:700;margin-bottom:16px;">
         ${escapeHtml(aluno.nome)}
       </div>
+      ${contrato ? `<div style="font-size:15px;font-weight:600;color:#444;margin:-10px 0 16px;">
+        ${contrato}
+      </div>` : ""}
       <div style="background:#fff;padding:20px;border-radius:12px;display:inline-block;">
         <svg id="svgCodigoBarras"></svg>
       </div>
