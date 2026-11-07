@@ -1849,6 +1849,23 @@ async function exportarHistoricoAluno() {
 
 let _pedidosPendentes = [];
 
+// O número de pedidos por decidir, no botão do menu principal. A cantina decide
+// por volta das 9h do próprio dia (decisão de 2026-11-07), e sem isto só sabia
+// que havia pedidos se abrisse o ecrã. aria-hidden no HTML: o nome do botão
+// continua a ser "Pedidos de Cancelamento". Uma falha aqui não estraga o menu.
+async function atualizarContadorPedidos(){
+  const el = document.getElementById("contadorPedidos");
+  if(!el) return;
+  try {
+    const { data, error } = await supabaseClient.rpc("listar_solicitacoes_pendentes");
+    const n = error ? 0 : (data || []).length;
+    el.textContent = n ? String(n) : "";
+    el.style.display = n ? "inline-block" : "none";
+  } catch (err) {
+    console.warn("Não foi possível contar os pedidos pendentes", err);
+  }
+}
+
 async function showPedidosCancelamento(){
   show("cantinaPedidos");
 
@@ -1877,8 +1894,14 @@ async function showPedidosCancelamento(){
 // TUDO o que o aluno escreveu passa por escapeHtml. Isto é renderizado na sessão
 // da cantina, que é a conta que aprova cancelamentos e liquida dívidas.
 function _cartaoPedido(p){
+  // Um pedido para hoje (ou para um dia que já passou) é o que a cantina tem de
+  // decidir já: destaca-se. A decisão não tem prazo; só o pedido do aluno tem.
+  const hoje = new Date().toISOString().split("T")[0];
+  const urgente = p.data_reserva <= hoje;
+  const etiqueta = p.data_reserva === hoje ? "⏰ Almoço de hoje" : "⏰ Dia já passou";
   return `
-    <div style="border:1px solid #e0e0e0; border-radius:10px; padding:12px; margin-bottom:10px; text-align:left;">
+    <div class="cartao-pedido${urgente ? " pedido-urgente" : ""}" style="border:${urgente ? "2px solid #e8590c" : "1px solid #e0e0e0"}; ${urgente ? "background:#fff4e5;" : ""} border-radius:10px; padding:12px; margin-bottom:10px; text-align:left;">
+      ${urgente ? `<div style="color:#b35000; font-size:13px; font-weight:700; margin-bottom:6px;">${etiqueta}</div>` : ""}
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
         <b>👤 ${escapeHtml(p.aluno_nome)}</b>
         <span style="color:#666; font-size:13px;">${formatarTipoRefeicao(p.tipo_refeicao)} · ${p.data_reserva}</span>

@@ -614,9 +614,11 @@ async function menu(){
       <button class="btn-full" onclick="showLeitorCodigo()">Leitor</button>
       <button class="btn-full" onclick="showCantinaHistorico()">Histórico de Aluno</button>
       <button class="btn-full" onclick="showCantinaAlunos()">Alunos</button>
-      <button class="btn-full" onclick="showPedidosCancelamento()">Pedidos de Cancelamento</button>
+      <button class="btn-full" onclick="showPedidosCancelamento()">Pedidos de Cancelamento<span id="contadorPedidos" aria-hidden="true"
+        style="display:none;margin-left:8px;min-width:22px;padding:2px 7px;border-radius:11px;background:#e8590c;color:#fff;font-size:13px;font-weight:700;"></span></button>
       <button class="btn-full" onclick="showCantinaSaldos()">Valores Pendentes</button>
     `;
+    atualizarContadorPedidos();
   }
 }
 
