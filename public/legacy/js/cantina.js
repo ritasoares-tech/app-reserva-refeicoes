@@ -179,9 +179,18 @@ function _cartaoCriarRefeicao(iso, tipo, existente){
   };
   const precos = { pequeno_almoco: 2, almoco: 4, jantar: 4 };
 
+  // O mesmo prazo que o aluno tem para reservar (_prazoLimite, aluno.js) e que o
+  // menus_guard (012) aplica no servidor: depois dele a refeição está contada e
+  // um menu novo já não serve a ninguém.
+  const foraDePrazo = new Date() >= _prazoLimite(tipo, iso);
+
   let corpo = "";
   if(existente){
     corpo = `<div style="color:#2e7d32;font-size:13px;">✅ Criado${existente.prato ? ` — ${escapeHtml(existente.prato)}` : ""}</div>`;
+  } else if(foraDePrazo){
+    corpo = `<div style="color:#c62828;font-size:13px;">⏰ Prazo ultrapassado — ${
+      tipo === "pequeno_almoco" ? "até às 23:00 do dia anterior" : "até às 9:00 do próprio dia"
+    }</div>`;
   } else if(tipo === "pequeno_almoco"){
     corpo = `
       <div style="font-size:13px;color:#555;margin-bottom:8px;">Pão e Leite (fixo)</div>
@@ -248,9 +257,8 @@ async function addMenuDireto(dataValue, tipo, pratoEntrada) {
     return;
   }
 
-  const hoje = new Date().toISOString().split("T")[0];
-  if (dataValue < hoje) {
-    mostrarMensagem("warning", "⚠️ Não podes criar menus com data passada");
+  if (new Date() >= _prazoLimite(tipo, dataValue)) {
+    mostrarMensagem("warning", "⚠️ Já passou o prazo para criar este menu neste dia");
     return;
   }
 

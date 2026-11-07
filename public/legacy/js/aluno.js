@@ -768,7 +768,9 @@ function _cartaoReserva(r, ctx){
   }
 
   const cancelamentosAtuais = cancelamentosUsuarioMesAlmoco[keyMes] || 0;
-  const mostrarAvisoLimite = r.tipo === "almoco" && !podeCancelar && estaAtiva && cancelamentosAtuais >= 2;
+  // dentroPrazo é obrigatório aqui: o pedido especial passa por cima do LIMITE,
+  // nunca do PRAZO. Sem ele, um almoço de ontem também oferecia o pedido.
+  const mostrarAvisoLimite = r.tipo === "almoco" && !podeCancelar && estaAtiva && dentroPrazo && cancelamentosAtuais >= 2;
 
   // Pendente ganha ao rejeitado: é o estado atual. 'aprovado' não mostra nada —
   // a própria reserva já mostra o resultado (cancelada, ou com o ícone de dieta).
